@@ -1,0 +1,181 @@
+# openai-ollama-proxy
+
+把 OpenAI 兼容 API(DeepSeek / 智谱 BigModel / Kimi 等)转换/暴露为 **Ollama API**,
+同时透传 OpenAI 兼容接口(`/v1/chat/completions`),供 **VS Code Copilot 本地模型**、
+Continue、Cline、Cherry Studio 等工具使用。仅依赖 Python 标准库,零第三方依赖。
+
+## 功能
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/tags` | 汇总各 provider 模型列表;优先匹配 `models/*.json`,未命中自动生成 tag 条目 |
+| `POST /api/show` | 优先返回 `models/*.json` 的 show 内容,未命中自动生成应答 |
+| `POST /api/chat` | 转换为 OpenAI `/v1/chat/completions` 转发(支持流式) |
+| `POST /api/generate` | 转换为 OpenAI `/v1/chat/completions` 转发(支持流式) |
+| `GET /api/version` | 返回模拟的 Ollama 版本号 |
+| `GET /v1/models` | OpenAI 兼容模型列表 |
+| `POST /v1/chat/completions` | OpenAI 兼容请求透传(支持流式) |
+
+模型名规则:上游模型 id 自动补 `:latest`,例如上游 `glm-4.5` -> Ollama 侧 `glm-4.5:latest`。
+
+## 快速开始
+
+1. 安装 Python 3.8+
+2. 编辑 `config.json`,填入各 provider 的 `api_key`(可复制 `config.example.json` 再改)
+3. 启动:
+
+```powershell
+python openai_ollama_proxy.py --config config.json
+```
+
+4. 验证:
+
+```powershell
+curl http://127.0.0.1:11434/api/tags
+curl http://127.0.0.1:11434/v1/models
+```
+
+## 配置文件说明
+
+```jsonc
+{
+  "host": "127.0.0.1",        // 监听地址
+  "port": 11434,              // 监听端口(与 Ollama 相同,冲突可改)
+  "timeout": 300,             // 上游请求超时(秒)
+  "cache_ttl": 60,            // /models 列表缓存时间(秒)
+  "default_num_ctx": 4096,    // 自动生成应答时的默认上下文长度
+  "models_dir": "models",     // models/*.json 所在目录(相对配置文件)
+  "use_env_proxy": true,      // 是否走系统环境代理
+  "log_level": "info",        // 日志级别: quiet / info / debug
+  "providers": [              // 可配置任意多组
+    {
+      "name": "deepseek",                     // 唯一名称
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-xxx",
+      "family": "deepseek",                   // 自动生成应答时使用的 family(可选)
+      "models": []                            // 留空 = 从上游 /v1/models 动态发现
+    }
+  ],
+  "mapping": {}               // 显式模型名映射,见下
+}
+```
+
+- `providers[].models` 留空数组时,`/api/tags` 与 `/v1/models` 会调用上游 `/v1/models`
+  动态拉取列表(带 `cache_ttl` 缓存);也可以手写模型 id 列表固定展示。
+- 若上游 id 与 Ollama 侧名字不一致,可用 `mapping` 显式指定:
+
+```json
+"mapping": {
+  "glm-4.5:latest": { "provider": "bigmodel", "model": "glm-4.5" },
+  "deepseek-chat:latest": { "provider": "deepseek", "model": "deepseek-chat" }
+}
+```
+
+## VS Code Copilot 配置
+
+在 VS Code `settings.json` 中配置本地模型(OpenAI 兼容方式,走 `/v1`):
+
+```json
+"github.copilot.chat.localModels": [
+  {
+    "provider": "openai",
+    "url": "http://127.0.0.1:11434/v1",
+    "models": [
+      { "name": "GLM-4.5", "id": "glm-4.5:latest" },
+      { "name": "DeepSeek Chat", "id": "deepseek-chat:latest" }
+    ]
+  }
+]
+```
+
+- `id` 会作为 `/v1/chat/completions` 的 `model` 字段发送,需与 `/v1/models` 返回的 id 一致。
+- 也可把 `provider` 换成 `"ollama"`(走 `/api/chat`、`/api/tags` 等 Ollama 协议)。
+- 其他 Ollama 客户端(Continue、Cline、Cherry Studio 等)设置
+  `OLLAMA_HOST=http://127.0.0.1:11434` 即可。
+
+## models/ 目录
+
+`models/*.json` 是 Ollama `/api/tags` + `/api/show` 的应答模板(与官方字段一致),例如
+`models/glm-4.5.json`、`models/deepseek-v4-flash.json`。
+
+匹配规则:
+
+1. 按模型名(去掉 `:latest`)找 `models/<name>.json`,如 `glm-4.5:latest` -> `models/glm-4.5.json`;
+2. 再按文件内 `tag.name` / `tag.model` 字段匹配;
+3. 都没命中则自动生成(tag 条目或 show 应答)。
+
+## 日志
+
+默认输出 `info` 级日志,每次请求会打印 model、provider、上游 URL、token 用量与耗时,
+例如:
+
+```text
+[12:00:01] chat model=glm-4.5:latest provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
+[12:00:03] chat 完成 model=glm-4.5:latest provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
+[12:00:04] 127.0.0.1 "POST /api/chat HTTP/1.1" 200 - 3.1s
+```
+
+- `log_level` 配置项: `quiet`(关闭)/ `info`(默认) / `debug`(更多细节)
+- 启动时加 `--verbose` 等同于 `debug` 级别
+
+## 常驻服务(开机自启)
+
+`scripts/` 目录提供 Linux / Windows 的开机自启脚本:开机自动运行代理、崩溃自动重启。
+
+### Linux(systemd)
+
+```bash
+# 安装并启动(需 root)
+sudo bash scripts/install_linux_service.sh
+
+# 查看状态与实时日志
+systemctl status openai-ollama-proxy
+journalctl -u openai-ollama-proxy -f
+
+# 重启 / 停止 / 启动
+sudo systemctl restart openai-ollama-proxy
+sudo systemctl stop openai-ollama-proxy
+sudo systemctl start openai-ollama-proxy
+
+# 卸载
+sudo bash scripts/uninstall_linux_service.sh
+```
+
+- 脚本会把项目复制到 `/opt/openai-ollama-proxy`,生成 systemd 单元并开机自启
+- 默认以 `root` 运行;可用环境变量指定用户:`SERVICE_USER=ollama sudo bash scripts/install_linux_service.sh`(用户需已存在)
+- 启动参数、重启策略(失败重启,间隔 3 秒)可在生成的单元文件中调整
+
+### Windows(任务计划程序,无需额外依赖)
+
+以**管理员**身份打开 PowerShell,执行:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_windows_service.ps1
+```
+
+- 创建计划任务 `openai-ollama-proxy`,以 SYSTEM 账户开机自启,崩溃后自动重启(最多 3 次,间隔 1 分钟)
+- 运行日志写入项目根目录 `proxy-service.log`
+- 手动管理:
+
+```powershell
+Start-ScheduledTask -TaskName openai-ollama-proxy   # 启动
+Stop-ScheduledTask  -TaskName openai-ollama-proxy   # 停止
+Get-ScheduledTask   -TaskName openai-ollama-proxy   # 查看状态
+```
+
+- 卸载:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\uninstall_windows_service.ps1
+```
+
+> 备选方案:若希望使用真正的 Windows 服务,可配合 [NSSM](https://nssm.cc) 使用:
+> `nssm install openai-ollama-proxy <python.exe路径> <项目路径>\openai_ollama_proxy.py --config <配置路径>`,
+> 并在 `nssm edit openai-ollama-proxy` 中配置日志输出与自动重启。
+## 注意事项
+
+- 默认端口 `11434`,若本机已运行真实 Ollama 会端口冲突,请修改 `config.json` 的 `port`。
+- 仅做文本对话转换;`/api/generate` 的 `images` 参数会转换为 OpenAI `image_url`
+  格式透传,能否识别图片取决于上游模型。
+- 流式输出使用 chunked 编码,兼容 Ollama 的 `application/x-ndjson` 与 OpenAI 的
+  `text/event-stream`。

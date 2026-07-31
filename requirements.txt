@@ -1,0 +1,2 @@
+# openai-ollama-proxy 仅使用 Python 标准库, 无需安装任何第三方依赖
+# 运行环境要求: Python 3.8+ (使用了 http.server.ThreadingHTTPServer 等标准库特性)

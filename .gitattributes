@@ -1,0 +1,10 @@
+# 统一行尾规范
+* text=auto
+
+# 脚本与源码强制 LF
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf

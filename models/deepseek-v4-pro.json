@@ -1,0 +1,39 @@
+{
+  "tag": {
+    "name": "deepseek-v4-pro:latest",
+    "model": "deepseek-v4-pro:latest",
+    "modified_at": "2026-07-31T12:05:00Z",
+    "size": 800000000000,
+    "digest": "",
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "deepseek",
+      "families": ["deepseek"],
+      "parameter_size": "1.6T",
+      "quantization_level": "Q4_K_M"
+    }
+  },
+  "show": {
+    "parameters": "temperature 0.7\nnum_ctx 1048576",
+    "template": "{{ .System }}\n{{ .Prompt }}",
+    "capabilities": ["tools", "completion", "vision"],
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "deepseek",
+      "families": ["deepseek"],
+      "parameter_size": "1.6T",
+      "quantization_level": "Q4_K_M"
+    },
+    "model_info": {
+      "general.architecture": "deepseek",
+      "general.parameter_count": 1600000000000,
+      "deepseek.context_length": 1048576,
+      "deepseek.embedding_length": 16384,
+      "deepseek.block_count": 96,
+      "deepseek.expert_count": 512,
+      "deepseek.expert_used_count": 8
+    }
+  }
+}
