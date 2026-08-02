@@ -1,8 +1,9 @@
 # openai-ollama-proxy
 
-把 OpenAI 兼容 API(DeepSeek / 智谱 BigModel / Kimi 等)转换/暴露为 **Ollama API**,
-同时透传 OpenAI 兼容接口(`/v1/chat/completions`),供 **VS Code Copilot 本地模型**、
-Continue、Cline、Cherry Studio 等工具使用。仅依赖 Python 标准库,零第三方依赖。
+本项目的目的是把 OpenAI 兼容 API(DeepSeek / 智谱 BigModel / Kimi 等)转换/暴露为
+**Ollama API**,从而让 **Visual Studio 2022 / 2026 内置的 GitHub Copilot** 通过
+「添加 Ollama Provider」使用自定义 AI 模型。**本项目不是为 VS Code 设计的**。
+仅依赖 Python 标准库,零第三方依赖。
 
 ## 功能
 
@@ -71,27 +72,26 @@ curl http://127.0.0.1:11434/v1/models
 }
 ```
 
-## VS Code Copilot 配置
+## Visual Studio 2022 / 2026 内置 Copilot 配置
 
-在 VS Code `settings.json` 中配置本地模型(OpenAI 兼容方式,走 `/v1`):
+Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址,但支持
+「添加 Ollama Provider」。启动本代理后(默认监听 `http://127.0.0.1:11434`),
+按以下步骤配置:
 
-```json
-"github.copilot.chat.localModels": [
-  {
-    "provider": "openai",
-    "url": "http://127.0.0.1:11434/v1",
-    "models": [
-      { "name": "GLM-4.5", "id": "glm-4.5:latest" },
-      { "name": "DeepSeek Chat", "id": "deepseek-chat:latest" }
-    ]
-  }
-]
-```
+1. 打开 **Copilot Chat** 对话面板,点击模型下拉框,选择 **「管理模型」**(Manage Models);
+2. 点击 **添加模型 / 添加提供程序**,提供商(Provider)选择 **Ollama**;
+3. 服务地址填写本代理地址:`http://127.0.0.1:11434`;
+4. 点击 **添加 / 连接**,Visual Studio 会请求 `/api/tags` 拉取模型列表
+   (优先使用 `models/*.json`,未命中自动生成);
+5. 勾选需要的模型(如 `glm-4.5:latest`、`deepseek-chat:latest`)并保存;
+6. 之后在 Copilot 的模型下拉框中即可选择这些模型进行对话。
 
-- `id` 会作为 `/v1/chat/completions` 的 `model` 字段发送,需与 `/v1/models` 返回的 id 一致。
-- 也可把 `provider` 换成 `"ollama"`(走 `/api/chat`、`/api/tags` 等 Ollama 协议)。
-- 其他 Ollama 客户端(Continue、Cline、Cherry Studio 等)设置
-  `OLLAMA_HOST=http://127.0.0.1:11434` 即可。
+配置完成后,Visual Studio 通过 `/api/show` 获取模型信息、通过 `/api/chat`
+发起对话;本代理收到 Ollama 请求后自动转换为 OpenAI 兼容请求,并转发到
+`config.json` 中对应的 provider。
+
+> 本代理暴露的是标准 Ollama API,其他 Ollama 客户端理论上也可连接使用,但本项目
+> 主要面向 Visual Studio 2022 / 2026 内置 Copilot,不针对 VS Code 提供配置说明。
 
 ## models/ 目录
 
