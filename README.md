@@ -1,5 +1,7 @@
 # openai-ollama-proxy
 
+> **本项目已停止维护(archived),不再更新。请改用 [foundry-proxy](https://github.com/BrillianceRen/foundry-proxy)。**
+
 本项目的目的是把 OpenAI 兼容 API(DeepSeek / 智谱 BigModel / Kimi 等)转换/暴露为
 **Ollama API**,从而让 **Visual Studio 2022 / 2026 内置的 GitHub Copilot** 通过
 「添加 Ollama Provider」使用自定义 AI 模型。**本项目不是为 VS Code 设计的**。
