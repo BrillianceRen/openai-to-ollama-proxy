@@ -19,24 +19,20 @@
         }
       },
       "show": {
-        "capabilities": [
-          "thinking",
-          "completion",
-          "tools"
-        ],
+        "capabilities": ["thinking", "completion", "tools"],
         "details": {
-          "parent_model": "glm-5.2",
+          "parent_model": "",
           "format": "",
-          "family": "glm5.2",
+          "family": "glm",
           "families": null,
           "parameter_size": "756162687872",
           "quantization_level": ""
         },
         "model_info": {
-          "general.architecture": "glm5.2",
+          "general.architecture": "glm",
           "general.parameter_count": 756162687872,
-          "glm5.2.context_length": 1000000,
-          "glm5.2.embedding_length": 0
+          "glm.context_length": 1000000,
+          "glm.embedding_length": 4096
         },
         "modified_at": "2026-06-16T08:00:00-07:00"
       }

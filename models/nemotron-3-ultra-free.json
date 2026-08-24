@@ -12,31 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "nemotron_h",
+          "family": "",
           "families": null,
-          "parameter_size": "550B-A55B",
-          "quantization_level": "BF16 checkpoint / NVFP4-trained"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "nemotron_h",
+          "family": "nemotron",
           "families": null,
-          "parameter_size": "550B-A55B",
+          "parameter_size": "560524603904",
           "quantization_level": "BF16 checkpoint / NVFP4-trained"
         },
         "model_info": {
-          "general.architecture": "nemotron_h",
+          "general.architecture": "nemotron",
           "general.parameter_count": 560524603904,
-          "nemotron_h.context_length": 1000000,
-          "nemotron_h.embedding_length": 8192
+          "nemotron.context_length": 1000000,
+          "nemotron.embedding_length": 8192
         },
         "modified_at": "2026-06-04T00:00:00Z"
       }

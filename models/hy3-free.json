@@ -12,31 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "hy_v3",
+          "family": "",
           "families": null,
-          "parameter_size": "295B-A21B",
-          "quantization_level": "BF16"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "hy_v3",
+          "family": "hy",
           "families": null,
-          "parameter_size": "295B-A21B",
+          "parameter_size": "298786155776",
           "quantization_level": "BF16"
         },
         "model_info": {
-          "general.architecture": "hy_v3",
+          "general.architecture": "hy",
           "general.parameter_count": 298786155776,
-          "hy_v3.context_length": 190000,
-          "hy_v3.embedding_length": 4096
+          "hy.context_length": 190000,
+          "hy.embedding_length": 4096
         },
         "modified_at": "2026-07-06T00:00:00Z"
       }

@@ -12,30 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "deepseek_v4",
+          "family": "",
           "families": null,
-          "parameter_size": "API-managed",
-          "quantization_level": "provider-managed"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "deepseek_v4",
+          "family": "deepseek",
           "families": null,
-          "parameter_size": "API-managed",
-          "quantization_level": "provider-managed"
+          "parameter_size": "304180418494",
+          "quantization_level": "FP8"
         },
         "model_info": {
-          "general.architecture": "deepseek_v4",
-          "deepseek_v4.context_length": 1000000,
-          "deepseek_v4.embedding_length": 4096
+          "general.architecture": "deepseek",
+          "general.parameter_count": 304180418494,
+          "deepseek.context_length": 1048576,
+          "deepseek.embedding_length": 4096
         },
         "modified_at": "2026-07-31T00:00:00Z"
       }
@@ -51,31 +48,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "deepseek_v4",
+          "family": "",
           "families": null,
-          "parameter_size": "284B-A13B",
-          "quantization_level": "FP4 + FP8 mixed"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "deepseek_v4",
+          "family": "deepseek",
           "families": null,
-          "parameter_size": "284B-A13B",
+          "parameter_size": "304180418494",
           "quantization_level": "FP4 + FP8 mixed"
         },
         "model_info": {
-          "general.architecture": "deepseek_v4",
-          "deepseek_v4.context_length": 1000000,
-          "deepseek_v4.embedding_length": 4096,
-          "general.parameter_count": 290944616402
+          "general.architecture": "deepseek",
+          "general.parameter_count": 290944616402,
+          "deepseek.context_length": 1048576,
+          "deepseek.embedding_length": 4096
         },
         "modified_at": "2026-07-31T00:00:00Z"
       }

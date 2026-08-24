@@ -12,31 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "minimax_m2",
+          "family": "",
           "families": null,
-          "parameter_size": "230B-A10B",
-          "quantization_level": "FP8"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "minimax_m2",
+          "family": "minimax",
           "families": null,
-          "parameter_size": "230B-A10B",
+          "parameter_size": "228703644928",
           "quantization_level": "FP8"
         },
         "model_info": {
-          "general.architecture": "minimax_m2",
+          "general.architecture": "minimax",
           "general.parameter_count": 228703644928,
-          "minimax_m2.context_length": 204800,
-          "minimax_m2.embedding_length": 3072
+          "minimax.context_length": 204800,
+          "minimax.embedding_length": 3072
         },
         "modified_at": "2026-02-12T00:00:00Z"
       }

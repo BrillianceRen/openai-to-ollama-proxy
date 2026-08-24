@@ -12,24 +12,20 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "laguna",
+          "family": "",
           "families": null,
-          "parameter_size": "118B-A8B",
-          "quantization_level": "BF16"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking"
-        ],
+        "capabilities": ["completion", "tools", "thinking"],
         "details": {
           "parent_model": "",
           "format": "",
           "family": "laguna",
           "families": null,
-          "parameter_size": "118B-A8B",
+          "parameter_size": "117561977600",
           "quantization_level": "BF16"
         },
         "model_info": {

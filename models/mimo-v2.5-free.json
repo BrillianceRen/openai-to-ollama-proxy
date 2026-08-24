@@ -12,32 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "mimo_v2",
+          "family": "",
           "families": null,
-          "parameter_size": "310B-A15B",
-          "quantization_level": "FP8"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking",
-          "vision"
-        ],
+        "capabilities": ["completion", "tools", "thinking", "vision"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "mimo_v2",
+          "family": "mimo",
           "families": null,
-          "parameter_size": "310B-A15B",
+          "parameter_size": "310775040000",
           "quantization_level": "FP8"
         },
         "model_info": {
-          "general.architecture": "mimo_v2",
+          "general.architecture": "mimo",
           "general.parameter_count": 310775040000,
-          "mimo_v2.context_length": 200000,
-          "mimo_v2.embedding_length": 4096
+          "mimo.context_length": 200000,
+          "mimo.embedding_length": 4096
         },
         "modified_at": "2026-04-24T00:00:00Z"
       }

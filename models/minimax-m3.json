@@ -12,32 +12,27 @@
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "minimax_m3_vl",
+          "family": "",
           "families": null,
-          "parameter_size": "~428B-A23B",
-          "quantization_level": "BF16"
+          "parameter_size": "",
+          "quantization_level": ""
         }
       },
       "show": {
-        "capabilities": [
-          "completion",
-          "tools",
-          "thinking",
-          "vision"
-        ],
+        "capabilities": ["completion", "tools", "thinking", "vision"],
         "details": {
           "parent_model": "",
           "format": "",
-          "family": "minimax_m3_vl",
+          "family": "minimax",
           "families": null,
-          "parameter_size": "~428B-A23B",
+          "parameter_size": "427040140160",
           "quantization_level": "BF16"
         },
         "model_info": {
-          "general.architecture": "minimax_m3_vl",
+          "general.architecture": "minimax",
           "general.parameter_count": 427040140160,
-          "minimax_m3_vl.context_length": 512000,
-          "minimax_m3_vl.embedding_length": 6144
+          "minimax.context_length": 512000,
+          "minimax.embedding_length": 6144
         },
         "modified_at": "2026-06-01T00:00:00Z"
       }
