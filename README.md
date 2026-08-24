@@ -46,6 +46,8 @@ curl http://127.0.0.1:11434/v1/models
   "port": 11434,              // 监听端口(与 Ollama 相同,冲突可改)
   "timeout": 300,             // 上游请求超时(秒)
   "cache_ttl": 60,            // /models 列表缓存时间(秒)
+  "fetch_wait_timeout": 30,   // 首次拉取模型列表的最长等待(秒,默认 30)
+  "max_body_bytes": 67108864, // 请求体大小上限(字节,默认 64 MB)
   "default_num_ctx": 4096,    // 自动生成应答时的默认上下文长度
   "models_dir": "models",     // models/*.json 所在目录(相对配置文件)
   "use_env_proxy": true,      // 是否走系统环境代理
@@ -66,6 +68,8 @@ curl http://127.0.0.1:11434/v1/models
 
 - `providers[].models` 留空数组时,`/api/tags` 与 `/v1/models` 会调用上游 `/v1/models`
   动态拉取列表(带 `cache_ttl` 缓存);也可以手写模型 id 列表固定展示。
+- `cache_ttl` 过期后,`/api/tags` 会立即返回旧缓存并在后台刷新,不阻塞请求;
+  启动时自动并行预热所有 provider,`fetch_wait_timeout` 控制首次拉取的最长等待。
 - `providers[].headers` 可为某个 provider 添加自定义请求头,例如被上游要求特定
   `User-Agent` 时配置 `{"User-Agent": "..."}`。这些头会在 Authorization 之后合并,
   可覆盖默认 Content-Type、Accept 和 User-Agent。

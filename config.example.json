@@ -3,6 +3,8 @@
   "port": 11434,
   "timeout": 300,
   "cache_ttl": 60,
+  "fetch_wait_timeout": 30,
+  "max_body_bytes": 67108864,
   "default_num_ctx": 4096,
   "models_dir": "models",
   "use_env_proxy": true,

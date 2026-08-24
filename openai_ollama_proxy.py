@@ -67,7 +67,12 @@ def iter_sse(resp):
     for raw in resp:
         line = raw.decode("utf-8", "replace").rstrip("\r\n")
         if line.startswith("data:"):
-            buf.append(line[len("data:"):].strip())
+            payload = line[len("data:"):].strip()
+            if payload.lower() == "[done]":
+                if buf:
+                    yield "\n".join(buf)
+                return
+            buf.append(payload)
         elif line == "" and buf:
             yield "\n".join(buf)
             buf = []
@@ -76,6 +81,10 @@ def iter_sse(resp):
 
 
 class ModelNotFoundError(Exception):
+    pass
+
+
+class BodyTooLargeError(Exception):
     pass
 
 
@@ -110,6 +119,8 @@ class Config:
         self.port = int(data.get("port", 11434))
         self.timeout = float(data.get("timeout", 300))
         self.cache_ttl = float(data.get("cache_ttl", 60))
+        self.fetch_wait_timeout = float(data.get("fetch_wait_timeout", 30))
+        self.max_body_bytes = int(data.get("max_body_bytes", 64 * 1024 * 1024))
         self.default_num_ctx = int(data.get("default_num_ctx", 4096))
         self.models_dir = os.path.abspath(
             os.path.join(base_dir, str(data.get("models_dir", "models"))))
@@ -141,13 +152,17 @@ class Proxy:
     def __init__(self, config):
         self.config = config
         self.log_level = config.log_level
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.model_routes = {}       # Ollama model name(lower) -> (provider name, upstream id)
         self.base_model_routes = {}  # model base(lower) -> first (provider name, upstream id)
         self.fetched_at = {}         # provider name -> 上次 /models 时间
         self.fetched_ids = {}        # provider name -> [model ids]
         self.models_entries = None
+        self.fetch_wait = threading.Condition(self.lock)
+        self.fetching = set()
+        self.refreshing = set()
         self._init_owner_from_config()
+        self._init_routes_from_models()
 
     # ---------------- 通用 ----------------
     def log(self, msg, level="info"):
@@ -208,6 +223,12 @@ class Proxy:
             if provider and target.get("model"):
                 self._register_route(provider, target["model"], alias)
 
+    def _init_routes_from_models(self):
+        for item in self.list_models_files():
+            provider = self.get_provider(item["provider"])
+            if provider:
+                self._register_provider_model(provider, item["upstream"])
+
     def upstream_request(self, provider, url, payload=None):
         headers = {
             "Content-Type": "application/json",
@@ -220,12 +241,28 @@ class Proxy:
         req = urllib.request.Request(
             url, data=data, headers=headers,
             method="POST" if payload is not None else "GET")
+        started = time.time()
+        self.log("upstream 请求 provider=%s %s %s bytes=%d header_names=%s" % (
+            provider.name, req.get_method(), url,
+            len(data or b""),
+            ",".join(sorted(name for name, _value in req.header_items()))), level="debug")
         try:
-            return self._opener().open(req, timeout=self.config.timeout)
+            response = self._opener().open(req, timeout=self.config.timeout)
+            self.log("upstream 响应 provider=%s status=%s type=%s bytes=%d elapsed=%.2fs" % (
+                provider.name, response.status,
+                response.headers.get("Content-Type", ""),
+                int(response.headers.get("Content-Length") or 0),
+                time.time() - started), level="debug")
+            return response
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", "replace")
+            self.log("upstream HTTP错误 provider=%s status=%s type=%s body=%s elapsed=%.2fs" % (
+                provider.name, exc.code, exc.headers.get("Content-Type", ""),
+                err_body[:300], time.time() - started), level="debug")
             raise UpstreamError(exc.code, err_body) from exc
         except urllib.error.URLError as exc:
+            self.log("upstream 连接错误 provider=%s reason=%s elapsed=%.2fs" % (
+                provider.name, exc.reason, time.time() - started), level="debug")
             raise UpstreamError(0, str(exc.reason)) from exc
 
     # ---------------- 模型列表 ----------------
@@ -234,33 +271,92 @@ class Proxy:
         with self.lock:
             cached = self.fetched_ids.get(provider.name)
             cached_at = self.fetched_at.get(provider.name, 0)
-        if not force and cached is not None and (now - cached_at) < self.config.cache_ttl:
-            self.log("[%s] /models 使用缓存 %d 个模型" % (provider.name, len(cached)), level="debug")
-            return list(cached)
+            if not force and cached is not None:
+                if (now - cached_at) < self.config.cache_ttl:
+                    self.log("[%s] /models 使用缓存 %d 个模型" % (provider.name, len(cached)), level="debug")
+                    return list(cached)
+                if provider.name not in self.refreshing:
+                    self.refreshing.add(provider.name)
+                    self.log("[%s] /models 缓存过期,后台刷新 %d 个模型" % (provider.name, len(cached)), level="debug")
+                    threading.Thread(
+                        target=self._background_refresh, args=(provider,),
+                        daemon=True, name="models-refresh-" + provider.name).start()
+                return list(cached)
+            if provider.name in self.fetching:
+                deadline = time.time() + self.config.fetch_wait_timeout
+                while provider.name in self.fetching and time.time() < deadline:
+                    self.fetch_wait.wait(0.2)
+                cached = self.fetched_ids.get(provider.name)
+                if cached is not None:
+                    return list(cached)
+                return list(provider.models)
+            self.fetching.add(provider.name)
+            self.log("[%s] /models 首次获取中..." % provider.name, level="debug")
+        try:
+            ids = self._fetch_provider_models_raw(provider)
+        except Exception as exc:
+            self.log("[%s] /models 获取失败: %s" % (provider.name, exc), level="error")
+            return list(provider.models)
+        finally:
+            with self.lock:
+                self.fetching.discard(provider.name)
+                self.fetch_wait.notify_all()
+        return ids
 
+    def _fetch_provider_models_raw(self, provider):
+        ids = []
         if provider.models:
             ids = list(provider.models)
         else:
+            resp = self.upstream_request(provider, provider.models_url)
             try:
-                resp = self.upstream_request(provider, provider.models_url)
-                try:
-                    raw = resp.read().decode("utf-8", "replace")
-                finally:
-                    resp.close()
-                data = json.loads(raw)
-                ids = [str(m.get("id", "")).strip() for m in data.get("data", [])
-                       if str(m.get("id", "")).strip()]
-                self.log("[%s] /models 获取到 %d 个模型" % (provider.name, len(ids)))
-            except Exception as exc:
-                self.log("[%s] /models 获取失败: %s" % (provider.name, exc), level="error")
-                return list(provider.models)
-
+                raw = resp.read().decode("utf-8", "replace")
+            finally:
+                resp.close()
+            data = json.loads(raw)
+            ids = [str(m.get("id", "")).strip() for m in data.get("data", [])
+                   if str(m.get("id", "")).strip()]
+            self.log("[%s] /models 获取到 %d 个模型" % (provider.name, len(ids)))
         with self.lock:
             self.fetched_ids[provider.name] = list(ids)
             self.fetched_at[provider.name] = time.time()
             for mid in ids:
                 self._register_provider_model(provider, mid)
-        return ids
+        return list(ids)
+
+    def _background_refresh(self, provider):
+        try:
+            self._fetch_provider_models_raw(provider)
+        except Exception as exc:
+            self.log("[%s] /models 后台刷新失败: %s" % (provider.name, exc), level="error")
+        finally:
+            with self.lock:
+                self.refreshing.discard(provider.name)
+                self.fetch_wait.notify_all()
+
+    def _fetch_missing_models(self, providers):
+        with self.lock:
+            missing = [p for p in providers if p.name not in self.fetched_ids]
+        if not missing:
+            return
+        threads = []
+        for provider in missing:
+            thread = threading.Thread(
+                target=self.fetch_provider_models, args=(provider,),
+                daemon=True, name="models-fetch-" + provider.name)
+            thread.start()
+            threads.append(thread)
+        deadline = time.time() + self.config.fetch_wait_timeout
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.time()))
+
+    def warm_models(self):
+        for provider in self.config.providers:
+            if provider.name in self.fetched_ids:
+                continue
+            threading.Thread(
+                target=self.fetch_provider_models, args=(provider,),
+                daemon=True, name="models-warm-" + provider.name).start()
 
     def resolve_model(self, name):
         """把 Ollama 模型名精确映射为 (provider, upstream_model_id)。"""
@@ -290,12 +386,7 @@ class Proxy:
                 if mid == name or self._model_base(mid) == self._model_base(name):
                     return provider, mid
 
-        for provider in self.config.providers:
-            if provider.name not in self.fetched_ids:
-                try:
-                    self.fetch_provider_models(provider)
-                except Exception:
-                    pass
+        self._fetch_missing_models(self.config.providers)
 
         with self.lock:
             route = self.model_routes.get(name.lower())
@@ -395,6 +486,7 @@ class Proxy:
     # ---------------- /api/tags and /api/show responses ----------------
     def tags(self):
         entries, seen = [], set()
+        self._fetch_missing_models(self.config.providers)
         for provider in self.config.providers:
             for mid in self.fetch_provider_models(provider):
                 ollama_name = self.public_model_name(provider, mid)
@@ -881,6 +973,7 @@ class ProxyServer(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     server_version = "OllamaProxy/1.0"
     protocol_version = "HTTP/1.1"
+    timeout = 120
 
     @property
 
@@ -898,22 +991,85 @@ class Handler(BaseHTTPRequestHandler):
         proxy.log("%s %s%s" % (self.client_address[0], fmt % args, elapsed), level="info")
 
     # ---------------- 基础 IO ----------------
+    def log(self, message, level="info"):
+        self.server.proxy.log(message, level)
+
+    def _debug_headers(self):
+        wanted = ("User-Agent", "Content-Type", "Accept", "Authorization",
+                  "X-Requested-With", "Origin", "Referer")
+        values = []
+        for name in wanted:
+            value = self.headers.get(name)
+            if not value:
+                continue
+            if name.lower() == "authorization":
+                kind = value.split(" ", 1)[0] if " " in value else "token"
+                value = kind + " ***"
+            values.append("%s=%s" % (name, value))
+        return " ".join(values)
+
+    def _log_request(self):
+        target = urllib.parse.urlparse(self.path)
+        suffix = ("?" + target.query) if target.query else ""
+        self.log("web 入口 %s %s%s %s" % (
+            self.command, target.path, suffix, self._debug_headers()), level="debug")
+
+    def _log_json_body(self, body):
+        if not isinstance(body, dict):
+            self.log("web 请求体类型=%s" % type(body).__name__, level="debug")
+            return
+        summary = {
+            "model": body.get("model"),
+            "stream": body.get("stream"),
+            "messages": len(body["messages"]) if isinstance(body.get("messages"), list) else None,
+            "prompt_bytes": len(str(body.get("prompt") or "").encode("utf-8")),
+            "tools": len(body["tools"]) if isinstance(body.get("tools"), list) else None,
+        }
+        summary = {key: value for key, value in summary.items() if value is not None}
+        self.log("web 请求体 %s" % json.dumps(summary, ensure_ascii=False, sort_keys=True), level="debug")
+
+    @staticmethod
+    def _sse_payload(line):
+        if b"\"usage\"" not in line:
+            return None
+        if not line.lower().startswith(b"data:"):
+            return None
+        payload = line[5:].strip()
+        if not payload or payload.lower() == b"[done]":
+            return None
+        try:
+            value = json.loads(payload.decode("utf-8"))
+            return value if isinstance(value, dict) else None
+        except (ValueError, UnicodeDecodeError):
+            return None
+
     def read_body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except (TypeError, ValueError):
             length = 0
+        limit = self.proxy.config.max_body_bytes
+        if length < 0:
+            length = 0
+        if limit and limit > 0 and length > limit:
+            raise BodyTooLargeError("请求体超过上限 %d 字节" % limit)
         if length > 0:
             return self.rfile.read(length)
-        return self.rfile.read()
+        raw = self.rfile.read(limit + 1) if limit and limit > 0 else self.rfile.read()
+        if limit and limit > 0 and len(raw) > limit:
+            raise BodyTooLargeError("请求体超过上限 %d 字节" % limit)
+        return raw
 
     def json_body(self):
         raw = self.read_body()
+        self.log("web 请求体字节=%d" % len(raw), level="debug")
         if not raw:
             return {}
         try:
             return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
+            preview = raw[:200].decode("utf-8", "replace").replace("\n", "\\n")
+            self.log("web 非法JSON预览=%r error=%s" % (preview, exc), level="error")
             raise ValueError("请求体不是合法 JSON: %s" % exc)
 
     def send_json(self, obj, status=200, headers=None):
@@ -955,13 +1111,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def send_error_json(self, message, status=500):
+    def send_error_json(self, message, status=500, headers=None):
         path = urllib.parse.urlparse(self.path).path
         if path.startswith("/v1/"):
             obj = {"error": {"message": message, "type": "proxy_error", "code": status}}
         else:
             obj = {"error": message}
-        self.send_json(obj, status=status)
+        self.send_json(obj, status=status, headers=headers)
 
     # ---------------- 路由 ----------------
     def do_OPTIONS(self):
@@ -975,6 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._req_start = time.time()
+        self._log_request()
         path = urllib.parse.urlparse(self.path).path
         try:
             if path == "/":
@@ -1000,9 +1157,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._req_start = time.time()
+        self._log_request()
         path = urllib.parse.urlparse(self.path).path
         try:
             body = self.json_body()
+            self._log_json_body(body)
             if path == "/api/chat":
                 if body.get("stream"):
                     self.start_stream("application/x-ndjson")
@@ -1026,29 +1185,59 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("stream"):
                     resp = self.proxy.v1_chat(body, stream=True)
                     self.start_stream("text/event-stream")
+                    event_count = 0
+                    sse_buffer = bytearray()
+                    usage = {}
+                    client_done = False
                     try:
                         for raw in resp:
-                            if raw:
-                                self.write_chunk(raw)
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
+                            if not raw:
+                                continue
+                            self.write_chunk(raw)
+                            sse_buffer.extend(raw)
+                            while b"\n" in sse_buffer:
+                                line, remaining = sse_buffer.split(b"\n", 1)
+                                sse_buffer[:] = remaining
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                event_count += 1
+                                payload = self._sse_payload(line)
+                                if payload and isinstance(payload.get("usage"), dict):
+                                    usage = payload["usage"]
+                                if line.lower() == b"data: [done]":
+                                    client_done = True
+                                    break
+                            if client_done:
+                                break
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
+                        self.log("web 客户端断开 events=%d error=%s" % (event_count, exc), level="debug")
                     finally:
                         try:
                             resp.close()
                         except Exception:
                             pass
                         self.end_stream()
+                        elapsed = time.time() - getattr(self, "_req_start", time.time())
+                        self.log("web 流式结束 model=%s events=%d client_done=%s "
+                                 "prompt_tokens=%s completion_tokens=%s total_tokens=%s elapsed=%.2fs" % (
+                                     body.get("model"), event_count, client_done,
+                                     usage.get("prompt_tokens", "-"), usage.get("completion_tokens", "-"),
+                                     usage.get("total_tokens", "-"), elapsed), level="info")
                 else:
                     self.send_json(self.proxy.v1_chat(body, stream=False))
             else:
                 self.send_error_json("not found: " + path, 404)
+        except BodyTooLargeError as exc:
+            self.send_error_json(str(exc), 413, headers={"Connection": "close"})
+            self.close_connection = True
         except ModelNotFoundError as exc:
             self.send_error_json(str(exc), 404)
         except UpstreamError as exc:
             self.send_error_json("upstream error: %s" % (exc.body or exc), 502)
         except ValueError as exc:
             self.send_error_json(str(exc), 400)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as exc:
             self.proxy.log("POST %s 失败: %s" % (path, exc), level="error")
@@ -1094,6 +1283,7 @@ def main():
     if args.verbose:
         proxy.log_level = "debug"
 
+    proxy.warm_models()
     server = ProxyServer((config.host, config.port), Handler)
     server.proxy = proxy
 
