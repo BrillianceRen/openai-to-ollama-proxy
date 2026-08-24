@@ -24,6 +24,7 @@ POST /v1/chat/completions  透传(支持流式)
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -50,6 +51,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "config.json")
 DEFAULT_TEMPLATE = "{{ .System }}\n{{ .Prompt }}"
 OLLAMA_VERSION = "0.5.4"
+__version__ = "1.1.0"
 
 
 def now_iso():
@@ -153,6 +155,7 @@ class Proxy:
         self.config = config
         self.log_level = config.log_level
         self.lock = threading.RLock()
+        self._opener_cache = None
         self.model_routes = {}       # Ollama model name(lower) -> (provider name, upstream id)
         self.base_model_routes = {}  # model base(lower) -> first (provider name, upstream id)
         self.fetched_at = {}         # provider name -> 上次 /models 时间
@@ -174,9 +177,15 @@ class Proxy:
         print("[%s] %s" % (time.strftime("%H:%M:%S"), msg), file=stream, flush=True)
 
     def _opener(self):
-        if self.config.use_env_proxy:
-            return urllib.request.build_opener()
-        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # The proxy/opener policy is fixed at startup (config.use_env_proxy), so build
+        # the opener once and reuse it — build_opener() has non-trivial per-call cost.
+        if self._opener_cache is None:
+            if self.config.use_env_proxy:
+                self._opener_cache = urllib.request.build_opener()
+            else:
+                self._opener_cache = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({}))
+        return self._opener_cache
 
     def get_provider(self, name):
         for provider in self.config.providers:
@@ -780,17 +789,53 @@ class Proxy:
         }
 
     # ---------------- /api/generate ----------------
+    @staticmethod
+    def _get_image_mime(data):
+        """嗅探 base64 图片的真实 MIME 类型(而非一律当成 PNG)。
+
+        Ollama 的 /api/generate ``images`` 只传裸 base64,不携带格式信息;
+        此前代码硬编码 ``image/png``,jpg/webp/gif 等多模态请求会因 MIME 错误被上游拒绝。
+        通过解码后的魔数判断真实类型,无法识别时回退到 PNG(与旧行为一致)。
+        """
+        try:
+            raw = base64.b64decode(data.encode("ascii") if isinstance(data, str) else data)
+        except (ValueError, TypeError):
+            return "image/png"
+        if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if raw.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if raw[:6] in (b"GIF87a", b"GIF89a"):
+            return "image/gif"
+        if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+            return "image/webp"
+        if raw[:2] == b"BM":
+            return "image/bmp"
+        return "image/png"
+
+    @staticmethod
+    def _strip_data_uri(images):
+        """容忍 ``data:image/...;base64,`` 前缀(部分客户端会带上),剥离为纯 base64。"""
+        out = []
+        for img in images or []:
+            value = str(img).strip()
+            if "," in value and value.lstrip().lower().startswith("data:"):
+                value = value.split(",", 1)[1]
+            out.append(value)
+        return out
+
     def build_generate_payload(self, body, upstream_model):
         prompt = body.get("prompt", "") or ""
         messages = []
         if body.get("system"):
             messages.append({"role": "system", "content": str(body["system"])})
-        images = body.get("images") or []
+        images = self._strip_data_uri(body.get("images") or [])
         if images:
             content = [{"type": "text", "text": str(prompt)}]
             for img in images:
                 content.append({"type": "image_url",
-                                "image_url": {"url": "data:image/png;base64," + img}})
+                                "image_url": {"url": "data:%s;base64,%s"
+                                              % (self._get_image_mime(img), img)}})
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": str(prompt)})
@@ -1055,10 +1100,35 @@ class Handler(BaseHTTPRequestHandler):
             raise BodyTooLargeError("请求体超过上限 %d 字节" % limit)
         if length > 0:
             return self.rfile.read(length)
-        raw = self.rfile.read(limit + 1) if limit and limit > 0 else self.rfile.read()
-        if limit and limit > 0 and len(raw) > limit:
-            raise BodyTooLargeError("请求体超过上限 %d 字节" % limit)
-        return raw
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            return self._read_chunked(limit)
+        # No Content-Length and not chunked -> the request has no body. Return
+        # immediately instead of blocking on a limit+1-byte read that stalls to
+        # the connection timeout for the common empty-body POST case.
+        return b""
+
+    def _read_chunked(self, limit):
+        data = bytearray()
+        while True:
+            size_line = self.rfile.readline()
+            if not size_line or size_line in (b"\r\n", b"\n"):
+                break
+            try:
+                size = int(size_line.strip().split(b";", 1)[0], 16)
+            except ValueError:
+                break
+            if size == 0:
+                # consume trailer block up to the terminating blank line
+                while True:
+                    trailer = self.rfile.readline()
+                    if trailer in (b"\r\n", b"\n", b""):
+                        break
+                break
+            if limit and limit > 0 and len(data) + size > limit:
+                raise BodyTooLargeError("请求体超过上限 %d 字节" % limit)
+            data.extend(self.rfile.read(size))
+            self.rfile.readline()  # trailing CRLF after each chunk
+        return bytes(data)
 
     def json_body(self):
         raw = self.read_body()
@@ -1253,6 +1323,8 @@ def main():
     parser.add_argument("--host", default=None, help="覆盖监听地址")
     parser.add_argument("--port", type=int, default=None, help="覆盖监听端口")
     parser.add_argument("--verbose", action="store_true", help="输出详细日志")
+    parser.add_argument("--version", action="version",
+                        version="openai-ollama-proxy %s" % __version__)
     args = parser.parse_args()
 
     config_path = args.config

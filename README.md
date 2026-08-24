@@ -138,6 +138,41 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 （如 `deepseek-v4-flash:opencode-zen`）。这些名称会同时出现在 `/api/tags`
 和 `/v1/models` 中，并在请求时精确路由回对应 provider。
 
+## 安装为命令(pip / console script)
+
+除了直接运行 `python openai_ollama_proxy.py`,项目也提供标准打包(纯标准库,无第三方运行时
+依赖)。安装后可获得 `openai-ollama-proxy` 命令,便于开机自启脚本与日常使用:
+
+```bash
+pip install -e .            # 从源码目录安装
+openai-ollama-proxy --version            # openai-ollama-proxy 1.1.0
+openai-ollama-proxy --config config.json # 同 python openai_ollama_proxy.py
+```
+
+CLI 参数:
+
+| 参数 | 说明 |
+| --- | --- |
+| `--config <path>` | 配置文件路径(默认 `config.json`) |
+| `--host <addr>` | 覆盖监听地址 |
+| `--port <port>` | 覆盖监听端口 |
+| `--verbose` | 输出 `debug` 级日志 |
+| `--version` | 打印版本号并退出 |
+
+## 测试
+
+测试套件**完全离线**,以假上游响应验证转换与路由逻辑,不发起任何网络请求:
+
+```bash
+pip install -e ".[dev]"
+python -m pytest tests/ -v
+```
+
+覆盖范围:`/api/tags`、`/api/show`、`/api/chat`、`/api/generate`、`/v1/*` 的
+端到端转换(含流式 SSE 与 tool-call 增量拼接)、消息与工具调用双向转换、
+模型名校验/去重、配置解析、图片 MIME 嗅探、请求体读取(Content-Length /
+chunked / 超限)以及 CLI 参数。
+
 ## 日志
 
 默认输出 `info` 级日志,每次请求会打印 model、provider、上游 URL、token 用量与耗时,
@@ -210,6 +245,8 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall_windows_service.ps1
 
 - 默认端口 `11434`,若本机已运行真实 Ollama 会端口冲突,请修改 `config.json` 的 `port`。
 - 仅做文本对话转换;`/api/generate` 的 `images` 参数会转换为 OpenAI `image_url`
-  格式透传,能否识别图片取决于上游模型。
+  格式透传。图片 MIME 由解码后的魔数自动识别(`image/png` / `image/jpeg` /
+  `image/gif` / `image/webp` / `image/bmp`),并容忍 `data:image/...;base64,`
+  前缀;能否识别图片最终取决于上游模型。
 - 流式输出使用 chunked 编码,兼容 Ollama 的 `application/x-ndjson` 与 OpenAI 的
   `text/event-stream`。
