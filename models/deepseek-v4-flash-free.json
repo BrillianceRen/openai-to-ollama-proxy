@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "deepseek-v4-flash-free",
+      "tag": {
+        "name": "deepseek-v4-flash-free:latest",
+        "model": "deepseek-v4-flash-free:latest",
+        "modified_at": "2026-07-31T00:00:00Z",
+        "size": 292484669000,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "deepseek_v4",
+          "families": null,
+          "parameter_size": "284B-A13B",
+          "quantization_level": "FP4 + FP8 mixed"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "deepseek_v4",
+          "families": null,
+          "parameter_size": "284B-A13B",
+          "quantization_level": "FP4 + FP8 mixed"
+        },
+        "model_info": {
+          "general.architecture": "deepseek_v4",
+          "general.parameter_count": 290944616402,
+          "deepseek_v4.context_length": 200000,
+          "deepseek_v4.embedding_length": 4096
+        },
+        "modified_at": "2026-07-31T00:00:00Z"
+      }
+    }
+  }
+}

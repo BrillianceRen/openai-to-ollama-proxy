@@ -1,39 +1,45 @@
 {
-  "tag": {
-    "name": "deepseek-v4-pro:latest",
-    "model": "deepseek-v4-pro:latest",
-    "modified_at": "2026-07-31T12:05:00Z",
-    "size": 800000000000,
-    "digest": "",
-    "details": {
-      "parent_model": "",
-      "format": "gguf",
-      "family": "deepseek",
-      "families": ["deepseek"],
-      "parameter_size": "1.6T",
-      "quantization_level": "Q4_K_M"
-    }
-  },
-  "show": {
-    "parameters": "temperature 0.7\nnum_ctx 1048576",
-    "template": "{{ .System }}\n{{ .Prompt }}",
-    "capabilities": ["tools", "completion", "vision"],
-    "details": {
-      "parent_model": "",
-      "format": "gguf",
-      "family": "deepseek",
-      "families": ["deepseek"],
-      "parameter_size": "1.6T",
-      "quantization_level": "Q4_K_M"
-    },
-    "model_info": {
-      "general.architecture": "deepseek",
-      "general.parameter_count": 1600000000000,
-      "deepseek.context_length": 1048576,
-      "deepseek.embedding_length": 16384,
-      "deepseek.block_count": 96,
-      "deepseek.expert_count": 512,
-      "deepseek.expert_used_count": 8
+  "version": 1,
+  "providers": {
+    "deepseek": {
+      "model": "deepseek-v4-pro",
+      "tag": {
+        "name": "deepseek-v4-pro:latest",
+        "model": "deepseek-v4-pro:latest",
+        "modified_at": "2026-08-13T08:00:00-07:00",
+        "size": 892744322880,
+        "digest": "db976f1eacdd",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "",
+          "families": null,
+          "parameter_size": "",
+          "quantization_level": ""
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "deepseek-v4-pro:0813",
+          "format": "",
+          "family": "deepseek4",
+          "families": null,
+          "parameter_size": "1650497936906",
+          "quantization_level": "FP8"
+        },
+        "model_info": {
+          "deepseek4.context_length": 1048576,
+          "deepseek4.embedding_length": 4096,
+          "general.architecture": "deepseek4",
+          "general.parameter_count": 1650497936906
+        },
+        "modified_at": "2026-08-13T08:00:00-07:00"
+      }
     }
   }
 }

@@ -19,7 +19,7 @@
 | `GET /v1/models` | OpenAI 兼容模型列表 |
 | `POST /v1/chat/completions` | OpenAI 兼容请求透传(支持流式) |
 
-模型名规则:上游模型 id 自动补 `:latest`,例如上游 `glm-4.5` -> Ollama 侧 `glm-4.5:latest`。
+模型名规则:上游模型 id 自动补 `:latest`,例如上游 `glm-5.2` -> Ollama 侧 `glm-5.2:latest`。
 
 ## 快速开始
 
@@ -56,6 +56,7 @@ curl http://127.0.0.1:11434/v1/models
       "base_url": "https://api.deepseek.com/v1",
       "api_key": "sk-xxx",
       "family": "deepseek",                   // 自动生成应答时使用的 family(可选)
+      "headers": {},                          // 额外上游请求头(可选)
       "models": []                            // 留空 = 从上游 /v1/models 动态发现
     }
   ],
@@ -65,11 +66,17 @@ curl http://127.0.0.1:11434/v1/models
 
 - `providers[].models` 留空数组时,`/api/tags` 与 `/v1/models` 会调用上游 `/v1/models`
   动态拉取列表(带 `cache_ttl` 缓存);也可以手写模型 id 列表固定展示。
+- `providers[].headers` 可为某个 provider 添加自定义请求头,例如被上游要求特定
+  `User-Agent` 时配置 `{"User-Agent": "..."}`。这些头会在 Authorization 之后合并,
+  可覆盖默认 Content-Type、Accept 和 User-Agent。
+- OpenCode Zen 需要 Python 侧携带常规浏览器 `User-Agent` 才能通过边缘校验;
+  实测 `opencode/latest/...` 虽可访问模型列表,但会让 `x-preview-f-free`
+  对话上游返回 503,因此默认配置使用浏览器 UA。
 - 若上游 id 与 Ollama 侧名字不一致,可用 `mapping` 显式指定:
 
 ```json
 "mapping": {
-  "glm-4.5:latest": { "provider": "bigmodel", "model": "glm-4.5" },
+  "glm-5.2:latest": { "provider": "bigmodel", "model": "glm-5.2" },
   "deepseek-chat:latest": { "provider": "deepseek", "model": "deepseek-chat" }
 }
 ```
@@ -85,7 +92,7 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 3. 服务地址填写本代理地址:`http://127.0.0.1:11434`;
 4. 点击 **添加 / 连接**,Visual Studio 会请求 `/api/tags` 拉取模型列表
    (优先使用 `models/*.json`,未命中自动生成);
-5. 勾选需要的模型(如 `glm-4.5:latest`、`deepseek-chat:latest`)并保存;
+5. 勾选需要的模型(如 `glm-5.2:latest`、`deepseek-chat:latest`)并保存;
 6. 之后在 Copilot 的模型下拉框中即可选择这些模型进行对话。
 
 配置完成后,Visual Studio 通过 `/api/show` 获取模型信息、通过 `/api/chat`
@@ -97,14 +104,35 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 
 ## models/ 目录
 
-`models/*.json` 是 Ollama `/api/tags` + `/api/show` 的应答模板(与官方字段一致),例如
-`models/glm-4.5.json`、`models/deepseek-v4-flash.json`。
+`models/*.json` 按 provider 保存 Ollama `/api/tags` + `/api/show` 应答模板。
+模板内容仍遵循 Ollama 官方响应字段；外层 `providers` 只用于关联和路由。
 
-匹配规则:
+```json
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "deepseek-v4-flash",
+      "tag": { "...": "GET /api/tags 条目" },
+      "show": { "...": "POST /api/show 响应" }
+    },
+    "deepseek": {
+      "model": "deepseek-v4-flash",
+      "tag": { "...": "可与上面不同" },
+      "show": { "...": "可与上面不同" }
+    }
+  }
+}
+```
 
-1. 按模型名(去掉 `:latest`)找 `models/<name>.json`,如 `glm-4.5:latest` -> `models/glm-4.5.json`;
-2. 再按文件内 `tag.name` / `tag.model` 字段匹配;
-3. 都没命中则自动生成(tag 条目或 show 应答)。
+- `providers` 的键必须等于 `config.json.providers[].name`。
+- entry 的 `model` 是发送给该 provider 的上游模型 ID；省略时使用文件名。
+- 同一个模型文件可以包含多个 provider，每个 provider 的参数、上下文和能力可以不同。
+
+当多个 provider 暴露同一个上游模型 ID 时，代理会保留第一个 provider 的默认名
+（如 `deepseek-v4-flash:latest`），其他 provider 使用带 provider 后缀的 tag
+（如 `deepseek-v4-flash:opencode-zen`）。这些名称会同时出现在 `/api/tags`
+和 `/v1/models` 中，并在请求时精确路由回对应 provider。
 
 ## 日志
 
@@ -112,8 +140,8 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 例如:
 
 ```text
-[12:00:01] chat model=glm-4.5:latest provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
-[12:00:03] chat 完成 model=glm-4.5:latest provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
+[12:00:01] chat model=glm-5.2:latest provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
+[12:00:03] chat 完成 model=glm-5.2:latest provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
 [12:00:04] 127.0.0.1 "POST /api/chat HTTP/1.1" 200 - 3.1s
 ```
 

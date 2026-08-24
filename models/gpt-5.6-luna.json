@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "gpt-5.6-luna",
+      "tag": {
+        "name": "gpt-5.6-luna:latest",
+        "model": "gpt-5.6-luna:latest",
+        "modified_at": "2026-07-09T00:00:00Z",
+        "size": 0,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "gpt-luna",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "gpt-luna",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        },
+        "model_info": {
+          "general.architecture": "gpt",
+          "gpt.context_length": 1050000
+        },
+        "modified_at": "2026-07-09T00:00:00Z"
+      }
+    }
+  }
+}

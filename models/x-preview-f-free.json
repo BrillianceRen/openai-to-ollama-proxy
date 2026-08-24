@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "x-preview-f-free",
+      "tag": {
+        "name": "x-preview-f-free:latest",
+        "model": "x-preview-f-free:latest",
+        "modified_at": "2026-08-21T00:00:00Z",
+        "size": 0,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "ox-alpha-preview",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "ox-alpha-preview",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        },
+        "model_info": {
+          "general.architecture": "ox-alpha-preview",
+          "ox-alpha-preview.context_length": 1000000
+        },
+        "modified_at": "2026-08-21T00:00:00Z"
+      }
+    }
+  }
+}

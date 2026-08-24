@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "muse-spark-1.2",
+      "tag": {
+        "name": "muse-spark-1.2:latest",
+        "model": "muse-spark-1.2:latest",
+        "modified_at": "2026-08-05T00:00:00Z",
+        "size": 0,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "muse",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "muse",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        },
+        "model_info": {
+          "general.architecture": "muse",
+          "muse.context_length": 1048576
+        },
+        "modified_at": "2026-08-05T00:00:00Z"
+      }
+    }
+  }
+}

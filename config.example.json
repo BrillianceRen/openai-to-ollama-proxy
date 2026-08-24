@@ -28,6 +28,16 @@
       "api_key": "sk-请填入你的KimiKey",
       "family": "kimi",
       "models": []
+    },
+    {
+      "name": "opencode-zen",
+      "base_url": "https://opencode.ai/zen/v1",
+      "api_key": "sk-请填入你的OpenCodeZenKey",
+      "family": "opencode",
+      "models": [],
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36"
+      }
     }
   ],
   "mapping": {}

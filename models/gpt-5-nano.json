@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "gpt-5-nano",
+      "tag": {
+        "name": "gpt-5-nano:latest",
+        "model": "gpt-5-nano:latest",
+        "modified_at": "2025-08-07T00:00:00Z",
+        "size": 0,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "gpt-nano",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "gpt-nano",
+          "families": null,
+          "parameter_size": "not disclosed",
+          "quantization_level": "provider-managed"
+        },
+        "model_info": {
+          "general.architecture": "gpt",
+          "gpt.context_length": 400000
+        },
+        "modified_at": "2025-08-07T00:00:00Z"
+      }
+    }
+  }
+}

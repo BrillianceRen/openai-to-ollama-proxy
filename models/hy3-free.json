@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "hy3-free",
+      "tag": {
+        "name": "hy3-free:latest",
+        "model": "hy3-free:latest",
+        "modified_at": "2026-07-06T00:00:00Z",
+        "size": 597572342272,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "hy_v3",
+          "families": null,
+          "parameter_size": "295B-A21B",
+          "quantization_level": "BF16"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "hy_v3",
+          "families": null,
+          "parameter_size": "295B-A21B",
+          "quantization_level": "BF16"
+        },
+        "model_info": {
+          "general.architecture": "hy_v3",
+          "general.parameter_count": 298786155776,
+          "hy_v3.context_length": 190000,
+          "hy_v3.embedding_length": 4096
+        },
+        "modified_at": "2026-07-06T00:00:00Z"
+      }
+    }
+  }
+}

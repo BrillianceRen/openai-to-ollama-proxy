@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "laguna-s-2.1-free",
+      "tag": {
+        "name": "laguna-s-2.1-free:latest",
+        "model": "laguna-s-2.1-free:latest",
+        "modified_at": "2026-07-21T00:00:00Z",
+        "size": 235123955200,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "laguna",
+          "families": null,
+          "parameter_size": "118B-A8B",
+          "quantization_level": "BF16"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "laguna",
+          "families": null,
+          "parameter_size": "118B-A8B",
+          "quantization_level": "BF16"
+        },
+        "model_info": {
+          "general.architecture": "laguna",
+          "general.parameter_count": 117561977600,
+          "laguna.context_length": 256000,
+          "laguna.embedding_length": 3072
+        },
+        "modified_at": "2026-07-21T00:00:00Z"
+      }
+    }
+  }
+}

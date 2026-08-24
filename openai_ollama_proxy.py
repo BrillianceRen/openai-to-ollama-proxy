@@ -89,12 +89,17 @@ class UpstreamError(Exception):
 class Provider:
     """单个 OpenAI 兼容上游。"""
 
-    def __init__(self, name, base_url, api_key, models, family):
+    def __init__(self, name, base_url, api_key, models, family, headers=None):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
         self.models = [str(m).strip() for m in (models or []) if str(m).strip()]
         self.family = family or name
+        self.headers = {
+            str(key).strip(): str(value)
+            for key, value in (headers or {}).items()
+            if str(key).strip() and value is not None
+        }
         self.chat_url = self.base_url + "/chat/completions"
         self.models_url = self.base_url + "/models"
 
@@ -128,6 +133,7 @@ class Config:
                 api_key=p.get("api_key"),
                 models=p.get("models"),
                 family=p.get("family"),
+                headers=p.get("headers"),
             ))
 
 
@@ -136,10 +142,11 @@ class Proxy:
         self.config = config
         self.log_level = config.log_level
         self.lock = threading.Lock()
-        self.model_owner = {}   # upstream model id(lower) -> provider name
-        self.fetched_at = {}    # provider name -> 上次 /models 时间
-        self.fetched_ids = {}   # provider name -> [model ids]
-        self.models_files = None
+        self.model_routes = {}       # Ollama model name(lower) -> (provider name, upstream id)
+        self.base_model_routes = {}  # model base(lower) -> first (provider name, upstream id)
+        self.fetched_at = {}         # provider name -> 上次 /models 时间
+        self.fetched_ids = {}        # provider name -> [model ids]
+        self.models_entries = None
         self._init_owner_from_config()
 
     # ---------------- 通用 ----------------
@@ -156,16 +163,50 @@ class Proxy:
             return urllib.request.build_opener()
         return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    def _init_owner_from_config(self):
-        for p in self.config.providers:
-            for mid in p.models:
-                self.model_owner[mid.lower()] = p.name
-
     def get_provider(self, name):
-        for p in self.config.providers:
-            if p.name.lower() == str(name).lower():
-                return p
+        for provider in self.config.providers:
+            if provider.name.lower() == str(name).lower():
+                return provider
         return None
+
+    @staticmethod
+    def _model_base(name):
+        return str(name).split(":", 1)[0]
+
+    @staticmethod
+    def _provider_tag_suffix(name):
+        allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_."
+        value = str(name).lower()
+        return "".join(ch if ch in allowed else "-" for ch in value) or "provider"
+
+    @classmethod
+    def _qualified_model_name(cls, upstream_id, provider_name):
+        base, separator, tag = str(upstream_id).partition(":")
+        suffix = cls._provider_tag_suffix(provider_name)
+        return base + ":" + ((tag + "-" + suffix) if separator and tag else suffix)
+
+    def _register_route(self, provider, upstream_id, ollama_name):
+        provider_name = provider.name
+        route = (provider_name, str(upstream_id))
+        self.model_routes.setdefault(str(ollama_name).lower(), route)
+        self.base_model_routes.setdefault(self._model_base(upstream_id).lower(), route)
+        if ollama_name != upstream_id:
+            self.model_routes.setdefault(str(upstream_id).lower(), route)
+
+    def _register_provider_model(self, provider, upstream_id):
+        plain = str(upstream_id) if ":" in str(upstream_id) else str(upstream_id) + ":latest"
+        qualified = self._qualified_model_name(upstream_id, provider.name)
+        self._register_route(provider, upstream_id, plain)
+        self._register_route(provider, upstream_id, qualified)
+
+    def _init_owner_from_config(self):
+        for provider in self.config.providers:
+            for mid in provider.models:
+                self._register_provider_model(provider, mid)
+        for alias, target in self.config.mapping.items():
+            provider = self.get_provider(target.get("provider") or target.get("name"))
+            if provider and target.get("model"):
+                self._register_route(provider, target["model"], alias)
 
     def upstream_request(self, provider, url, payload=None):
         headers = {
@@ -174,6 +215,7 @@ class Proxy:
         }
         if provider.api_key:
             headers["Authorization"] = "Bearer " + provider.api_key
+        headers.update(provider.headers)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(
             url, data=data, headers=headers,
@@ -217,64 +259,108 @@ class Proxy:
             self.fetched_ids[provider.name] = list(ids)
             self.fetched_at[provider.name] = time.time()
             for mid in ids:
-                self.model_owner[mid.lower()] = provider.name
+                self._register_provider_model(provider, mid)
         return ids
 
     def resolve_model(self, name):
-        """把 Ollama 侧模型名映射为 (provider, upstream_model_id)。"""
+        """把 Ollama 模型名精确映射为 (provider, upstream_model_id)。"""
         name = (name or "").strip()
         if not name:
             return None, None
-        base = name.split(":", 1)[0] if ":" in name else name
 
-        # 1) 显式 mapping
-        mp = self.config.mapping.get(name) or self.config.mapping.get(base)
-        if mp:
-            provider = self.get_provider(mp.get("provider") or mp.get("name"))
+        mapping_target = self.config.mapping.get(name)
+        if mapping_target is None:
+            mapping_target = self.config.mapping.get(self._model_base(name))
+        if isinstance(mapping_target, dict):
+            provider = self.get_provider(mapping_target.get("provider") or mapping_target.get("name"))
             if provider:
-                return provider, str(mp.get("model") or base)
+                return provider, str(mapping_target.get("model") or self._model_base(name))
 
-        # 2) 运行时注册表(由 /models 或配置 models 列表填充)
         with self.lock:
-            owner = self.model_owner.get(name.lower()) or self.model_owner.get(base.lower())
-        if owner:
-            provider = self.get_provider(owner)
+            route = self.model_routes.get(name.lower())
+            if route is None:
+                route = self.base_model_routes.get(self._model_base(name).lower())
+        if route:
+            provider = self.get_provider(route[0])
             if provider:
-                return provider, base
+                return provider, route[1]
 
-        # 3) 配置的 models 列表
-        for p in self.config.providers:
-            for mid in p.models:
-                if mid == name or mid == base or mid + ":latest" == name:
-                    return p, mid
+        for provider in self.config.providers:
+            for mid in provider.models:
+                if mid == name or self._model_base(mid) == self._model_base(name):
+                    return provider, mid
 
-        # 4) 尚未拉取过的 provider 尝试动态获取一次
-        for p in self.config.providers:
-            if p.name not in self.fetched_ids:
+        for provider in self.config.providers:
+            if provider.name not in self.fetched_ids:
                 try:
-                    self.fetch_provider_models(p)
+                    self.fetch_provider_models(provider)
                 except Exception:
                     pass
-        with self.lock:
-            owner = self.model_owner.get(name.lower()) or self.model_owner.get(base.lower())
-        if owner:
-            provider = self.get_provider(owner)
-            if provider:
-                return provider, base
 
-        # 5) 无法路由到任何 provider
+        with self.lock:
+            route = self.model_routes.get(name.lower())
+            if route is None:
+                route = self.base_model_routes.get(self._model_base(name).lower())
+        if route:
+            provider = self.get_provider(route[0])
+            if provider:
+                return provider, route[1]
+
         return None, None
 
+    def public_model_name(self, provider, upstream_id):
+        plain = str(upstream_id) if ":" in str(upstream_id) else str(upstream_id) + ":latest"
+        with self.lock:
+            route = self.model_routes.get(plain.lower())
+        if route and route[0] == provider.name and route[1] == str(upstream_id):
+            return plain
+        return self._qualified_model_name(upstream_id, provider.name)
+
     # ---------------- models/*.json 匹配 ----------------
+    # ---------------- provider-scoped models/*.json matching ----------------
     def list_models_files(self):
-        if self.models_files is None:
+        if self.models_entries is None:
             files = []
             if os.path.isdir(self.config.models_dir):
-                for fn in sorted(os.listdir(self.config.models_dir)):
-                    if fn.lower().endswith(".json"):
-                        files.append(os.path.join(self.config.models_dir, fn))
-            self.models_files = files
-        return self.models_files
+                for root, _dirs, filenames in os.walk(self.config.models_dir):
+                    for filename in sorted(filenames):
+                        if filename.lower().endswith(".json"):
+                            files.append(os.path.join(root, filename))
+            entries = []
+            for path in files:
+                data = self.load_models_file(path)
+                if not isinstance(data, dict):
+                    continue
+                stem = os.path.splitext(os.path.basename(path))[0]
+                providers = data.get("providers")
+                if isinstance(providers, dict):
+                    scoped_entries = providers.items()
+                elif data.get("provider"):
+                    scoped_entries = [(data.get("provider"), {
+                        "model": data.get("model") or stem,
+                        "tag": data.get("tag"),
+                        "show": data.get("show"),
+                    })]
+                else:
+                    continue
+                for provider_name, entry in scoped_entries:
+                    if not isinstance(provider_name, str) or not isinstance(entry, dict):
+                        continue
+                    upstream_id = str(entry.get("model") or stem)
+                    tag = entry.get("tag") or entry.get("tag_model") or {}
+                    tag_name = str(tag.get("name") or tag.get("model") or upstream_id)
+                    entries.append({
+                        "provider": provider_name,
+                        "upstream": upstream_id,
+                        "base": self._model_base(upstream_id),
+                        "name": tag_name,
+                        "stem": stem,
+                        "tag": tag,
+                        "show": entry.get("show"),
+                        "path": path,
+                    })
+            self.models_entries = entries
+        return self.models_entries
 
     def load_models_file(self, path):
         try:
@@ -283,48 +369,54 @@ class Proxy:
         except Exception:
             return None
 
-    def find_models_entry(self, name):
-        """按 Ollama 模型名匹配 models 目录 JSON, 返回 (数据, 路径)。"""
-        base = name.split(":", 1)[0] if ":" in name else name
-        name_l, base_l = name.lower(), base.lower()
-        for path in self.list_models_files():
-            stem = os.path.splitext(os.path.basename(path))[0]
-            if stem.lower() in (name_l, base_l):
-                data = self.load_models_file(path)
-                if data:
-                    return data, path
-        for path in self.list_models_files():
-            data = self.load_models_file(path)
-            if not data:
-                continue
-            tag = data.get("tag") or data.get("tag_model") or {}
-            for key in ("name", "model"):
-                val = str(tag.get(key, "")).lower()
-                if val and val in (name_l, base_l):
-                    return data, path
+    def find_models_entry(self, provider, upstream_id, ollama_name=None):
+        """Find a model template by the owning (provider, upstream model) pair."""
+        entries = self.list_models_files()
+        provider_l = str(getattr(provider, "name", provider)).lower()
+        upstream_l = str(upstream_id).lower()
+        base_l = self._model_base(upstream_id).lower()
+
+        for item in entries:
+            if item["provider"].lower() == provider_l and item["upstream"].lower() == upstream_l:
+                return item, item["path"]
+        if ollama_name:
+            name_l = str(ollama_name).lower()
+            for item in entries:
+                if item["provider"].lower() != provider_l:
+                    continue
+                if name_l in (item["name"].lower(), item["upstream"].lower(),
+                              item["base"].lower(), item["stem"].lower()):
+                    return item, item["path"]
+        for item in entries:
+            if item["provider"].lower() == provider_l and item["base"].lower() == base_l:
+                return item, item["path"]
         return None, None
 
-    # ---------------- /api/tags 与 /api/show 应答 ----------------
+    # ---------------- /api/tags and /api/show responses ----------------
     def tags(self):
         entries, seen = [], set()
         for provider in self.config.providers:
             for mid in self.fetch_provider_models(provider):
-                tag = mid if ":" in mid else mid + ":latest"
-                key = tag.lower()
+                ollama_name = self.public_model_name(provider, mid)
+                key = ollama_name.lower()
                 if key in seen:
                     continue
                 seen.add(key)
-                entries.append(self.tags_entry_for(tag, mid, provider))
+                entries.append(self.tags_entry_for(ollama_name, mid, provider))
         self.log("tags 返回 %d 个模型(provider=%d)" % (len(entries), len(self.config.providers)))
         return {"models": entries}
 
-
     def tags_entry_for(self, ollama_name, upstream_id, provider):
-        data, _path = self.find_models_entry(ollama_name)
-        if data:
-            tag = data.get("tag") or data.get("tag_model")
-            if isinstance(tag, dict):
-                return tag
+        entry, path = self.find_models_entry(provider, upstream_id, ollama_name)
+        if entry and isinstance(entry.get("tag"), dict):
+            tag = dict(entry["tag"])
+            tag["name"] = ollama_name
+            tag["model"] = ollama_name
+            self.log("tags model=%s provider=%s source=file(%s)" % (
+                ollama_name, provider.name, os.path.basename(path)), level="debug")
+            return tag
+        return self.generate_tag_entry(ollama_name, provider)
+
     def generate_tag_entry(self, ollama_name, provider):
         return {
             "name": ollama_name,
@@ -334,49 +426,44 @@ class Proxy:
             "digest": "",
             "details": {
                 "parent_model": "",
-                "format": "gguf",
+                "format": "",
                 "family": provider.family,
-                "families": [provider.family],
-                "parameter_size": "unknown",
-                "quantization_level": "unknown",
+                "families": None,
+                "parameter_size": "",
+                "quantization_level": "",
             },
         }
 
     def show_for(self, name):
-        data, path = self.find_models_entry(name)
-        if data and isinstance(data.get("show"), dict):
-            show = dict(data["show"])
-            show.setdefault("license", "")
-            show.setdefault("modelfile", "")
-            self.log("show model=%s source=file(%s)" % (name, os.path.basename(path)))
-            return show
-        provider, _upstream = self.resolve_model(name)
+        provider, upstream = self.resolve_model(name)
+        if provider is not None and upstream:
+            entry, path = self.find_models_entry(provider, upstream, name)
+            if entry and isinstance(entry.get("show"), dict):
+                show = dict(entry["show"])
+                self.log("show model=%s provider=%s source=file(%s)" % (
+                    name, provider.name, os.path.basename(path)))
+                return show
         if provider is None:
             provider = self.config.providers[0]
         self.log("show model=%s source=auto provider=%s" % (name, provider.name))
         return self.generate_show(name, provider)
 
-
     def generate_show(self, ollama_name, provider):
         return {
-            "license": "",
-            "modelfile": "",
-            "parameters": "temperature 0.7\nnum_ctx %d" % self.config.default_num_ctx,
-            "template": DEFAULT_TEMPLATE,
+            "capabilities": ["completion", "tools"],
             "details": {
                 "parent_model": "",
-                "format": "gguf",
+                "format": "",
                 "family": provider.family,
-                "families": [provider.family],
-                "parameter_size": "unknown",
-                "quantization_level": "unknown",
+                "families": None,
+                "parameter_size": "",
+                "quantization_level": "",
             },
             "model_info": {
                 "general.architecture": provider.family,
-                "general.parameter_count": 0,
                 "%s.context_length" % provider.family: self.config.default_num_ctx,
             },
-            "capabilities": ["completion", "tools"],
+            "modified_at": now_iso(),
         }
 
     # ---------------- 消息/参数转换 ----------------
@@ -742,7 +829,7 @@ class Proxy:
         data, seen = [], set()
         for provider in self.config.providers:
             for mid in self.fetch_provider_models(provider):
-                tag = mid if ":" in mid else mid + ":latest"
+                tag = self.public_model_name(provider, mid)
                 if tag.lower() in seen:
                     continue
                 seen.add(tag.lower())

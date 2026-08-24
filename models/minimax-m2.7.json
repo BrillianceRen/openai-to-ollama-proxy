@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "minimax-m2.7",
+      "tag": {
+        "name": "minimax-m2.7:latest",
+        "model": "minimax-m2.7:latest",
+        "modified_at": "2026-03-18T00:00:00Z",
+        "size": 230066110464,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "minimax_m2",
+          "families": null,
+          "parameter_size": "230B-A10B",
+          "quantization_level": "FP8"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "minimax_m2",
+          "families": null,
+          "parameter_size": "230B-A10B",
+          "quantization_level": "FP8"
+        },
+        "model_info": {
+          "general.architecture": "minimax_m2",
+          "general.parameter_count": 228689764864,
+          "minimax_m2.context_length": 204800,
+          "minimax_m2.embedding_length": 3072
+        },
+        "modified_at": "2026-03-18T00:00:00Z"
+      }
+    }
+  }
+}

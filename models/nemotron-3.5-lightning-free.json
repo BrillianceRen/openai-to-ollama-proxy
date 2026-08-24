@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "providers": {
+    "opencode-zen": {
+      "model": "nemotron-3.5-lightning-free",
+      "tag": {
+        "name": "nemotron-3.5-lightning-free:latest",
+        "model": "nemotron-3.5-lightning-free:latest",
+        "modified_at": "2026-08-11T00:00:00Z",
+        "size": 65826538624,
+        "digest": "",
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "nemotron_h",
+          "families": null,
+          "parameter_size": "30B-A3B",
+          "quantization_level": "BF16 checkpoint / NVFP4-trained"
+        }
+      },
+      "show": {
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
+        "details": {
+          "parent_model": "",
+          "format": "",
+          "family": "nemotron_h",
+          "families": null,
+          "parameter_size": "30B-A3B",
+          "quantization_level": "BF16 checkpoint / NVFP4-trained"
+        },
+        "model_info": {
+          "general.architecture": "nemotron_h",
+          "general.parameter_count": 31577937344,
+          "nemotron_h.context_length": 262144,
+          "nemotron_h.embedding_length": 2688
+        },
+        "modified_at": "2026-08-11T00:00:00Z"
+      }
+    }
+  }
+}
