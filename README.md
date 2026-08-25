@@ -1,5 +1,11 @@
 # openai-ollama-proxy
 
+<div align="center">
+
+**简体中文** · [English](README.en.md)
+
+</div>
+
 本项目的目的是把 OpenAI 兼容 API(DeepSeek / 智谱 BigModel / Kimi 等)转换/暴露为
 **Ollama API**,从而让 **Visual Studio 2022 / 2026 内置的 GitHub Copilot** 通过
 「添加 Ollama Provider」使用自定义 AI 模型。**本项目不是为 VS Code 设计的**。
@@ -14,12 +20,18 @@
 | `GET /api/tags` | 汇总各 provider 模型列表;优先匹配 `models/*.json`,未命中自动生成 tag 条目 |
 | `POST /api/show` | 优先返回 `models/*.json` 的 show 内容,未命中自动生成应答 |
 | `POST /api/chat` | 转换为 OpenAI `/v1/chat/completions` 转发(支持流式) |
-| `POST /api/generate` | 转换为 OpenAI `/v1/chat/completions` 转发(支持流式) |
+| `POST /api/generate` | 转换为 OpenAI `/v1/chat/completions` 转发(支持流式,图片自动识别 MIME) |
+| `GET /api/ps` | 返回空模型列表,兼容 Ollama 客户端状态轮询 |
 | `GET /api/version` | 返回模拟的 Ollama 版本号 |
 | `GET /v1/models` | OpenAI 兼容模型列表 |
 | `POST /v1/chat/completions` | OpenAI 兼容请求透传(支持流式) |
 
 模型名规则:上游模型 id 自动补 `:latest`,例如上游 `glm-5.2` -> Ollama 侧 `glm-5.2:latest`。
+
+- 支持任意多组 provider(DeepSeek / 智谱 BigModel / Kimi / OpenCode Zen 等),模型列表
+  动态拉取并缓存;过期后立即返回旧缓存并后台刷新,列表请求不会被上游 `/models` 阻塞。
+- `models/*.json` 按 provider 保存 Ollama 官方应答模板;同名模型在不同 provider 下
+  的参数、上下文和能力可以不同。
 
 ## 快速开始
 
