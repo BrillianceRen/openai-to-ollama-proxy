@@ -4,8 +4,8 @@
     "deepseek": {
       "model": "deepseek-v4-pro",
       "tag": {
-        "name": "deepseek-v4-pro:latest",
-        "model": "deepseek-v4-pro:latest",
+        "name": "deepseek-v4-pro",
+        "model": "deepseek-v4-pro",
         "modified_at": "2026-08-13T08:00:00-07:00",
         "size": 892744322880,
         "digest": "db976f1eacdd",
@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "deepseek.context_length": 1048576,
           "deepseek.embedding_length": 4096
         },
-        "modified_at": "2026-08-13T08:00:00-07:00"
+        "modified_at": "2026-08-13T08:00:00-07:00",
+        "api_type": "chat_completions"
       }
     }
   }

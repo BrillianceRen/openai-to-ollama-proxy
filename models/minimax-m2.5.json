@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "minimax-m2.5",
       "tag": {
-        "name": "minimax-m2.5:latest",
-        "model": "minimax-m2.5:latest",
+        "name": "minimax-m2.5",
+        "model": "minimax-m2.5",
         "modified_at": "2026-02-12T00:00:00Z",
         "size": 230121630720,
         "digest": "",
@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "minimax.context_length": 204800,
           "minimax.embedding_length": 3072
         },
-        "modified_at": "2026-02-12T00:00:00Z"
+        "modified_at": "2026-02-12T00:00:00Z",
+        "api_type": "chat_completions"
       }
     }
   }

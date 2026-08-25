@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["thinking", "completion", "tools"],
+        "capabilities": [
+          "thinking",
+          "completion",
+          "tools"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "glm.context_length": 202752,
           "glm.embedding_length": 6144
         },
-        "modified_at": "2026-04-07T08:00:00-07:00"
+        "modified_at": "2026-04-07T08:00:00-07:00",
+        "api_type": "chat_completions"
       }
     }
   }

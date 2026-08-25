@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "mimo-v2.5-free",
       "tag": {
-        "name": "mimo-v2.5-free:latest",
-        "model": "mimo-v2.5-free:latest",
+        "name": "mimo-v2.5-free",
+        "model": "mimo-v2.5-free",
         "modified_at": "2026-04-24T00:00:00Z",
         "size": 315031102208,
         "digest": "",
@@ -19,7 +19,12 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking", "vision"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +39,8 @@
           "mimo.context_length": 200000,
           "mimo.embedding_length": 4096
         },
-        "modified_at": "2026-04-24T00:00:00Z"
+        "modified_at": "2026-04-24T00:00:00Z",
+        "api_type": "chat_completions"
       }
     }
   }

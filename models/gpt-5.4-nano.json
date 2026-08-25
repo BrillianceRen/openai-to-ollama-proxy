@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "gpt-5.4-nano",
       "tag": {
-        "name": "gpt-5.4-nano:latest",
-        "model": "gpt-5.4-nano:latest",
+        "name": "gpt-5.4-nano",
+        "model": "gpt-5.4-nano",
         "modified_at": "2026-03-17T00:00:00Z",
         "size": 0,
         "digest": "",
@@ -19,7 +19,12 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking", "vision"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -33,7 +38,8 @@
           "gpt.context_length": 1000000,
           "gpt.embedding_length": 4096
         },
-        "modified_at": "2026-03-17T00:00:00Z"
+        "modified_at": "2026-03-17T00:00:00Z",
+        "api_type": "responses"
       }
     }
   }

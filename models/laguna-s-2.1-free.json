@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "laguna-s-2.1-free",
       "tag": {
-        "name": "laguna-s-2.1-free:latest",
-        "model": "laguna-s-2.1-free:latest",
+        "name": "laguna-s-2.1-free",
+        "model": "laguna-s-2.1-free",
         "modified_at": "2026-07-21T00:00:00Z",
         "size": 235123955200,
         "digest": "",
@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "laguna.context_length": 256000,
           "laguna.embedding_length": 3072
         },
-        "modified_at": "2026-07-21T00:00:00Z"
+        "modified_at": "2026-07-21T00:00:00Z",
+        "api_type": "chat_completions"
       }
     }
   }

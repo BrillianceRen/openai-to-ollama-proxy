@@ -25,6 +25,7 @@
 | `GET /api/version` | 返回模拟的 Ollama 版本号 |
 | `GET /v1/models` | OpenAI 兼容模型列表 |
 | `POST /v1/chat/completions` | OpenAI 兼容请求透传(支持流式) |
+| `POST /v1/responses` | OpenAI Responses API 透传(支持流式) |
 
 模型名规则:所有模型统一命名为 `<上游模型>:<provider>`,例如 `glm-5.2` -> `glm-5.2:bigmodel`、
 `deepseek-v4-flash` -> `deepseek-v4-flash:deepseek` / `deepseek-v4-flash:opencode-zen`。
@@ -97,9 +98,14 @@ curl http://127.0.0.1:11434/v1/models
   `User-Agent` 时配置 `{"User-Agent": "..."}`。这些头会在 Authorization 之后合并,
   可覆盖默认 Content-Type、Accept 和 User-Agent。
 - OpenCode Zen 需要以下请求头才能通过上游边缘校验:
-  `User-Agent: opencode/1.18.21` 和 `Originator: opencode`。
+        `"Authorization": "Bearer <API KEY>"`。
 - `x-preview-f-free` 模型要求请求中必须包含 `tools` 字段;不带 tools 的请求
   上游会稳定返回 503(Endpoint is unavailable)。代理层可自动注入 noop tool 规避。
+- 模型 API 类型通过 `models/*.json` 中 `show.api_type` 配置:
+  `"chat_completions"`(默认)或 `"responses"`。代理自动将 Chat Completions
+  格式转换为 Responses API 并转换响应格式,客户端无需感知差异。
+- `models/*.json` 中 `tag.name` / `tag.model` 无需显式写出 provider 后缀,
+  代理会根据 `<model_id>:<provider>` 规则自动生成。
 - 若上游 id 与 Ollama 侧名字不一致,可用 `mapping` 显式指定:
 
 ```json

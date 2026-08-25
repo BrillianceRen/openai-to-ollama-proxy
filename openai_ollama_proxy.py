@@ -30,6 +30,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -82,6 +83,34 @@ def iter_sse(resp):
         yield "\n".join(buf)
 
 
+def iter_sse_events(resp):
+    """逐条解析 Responses API 的 SSE 事件, 产出 (event_type, data_dict) 元组。"""
+    event_type = None
+    data_lines = []
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if line.startswith("event:"):
+            event_type = line[len("event:"):].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[len("data:"):].strip())
+        elif line == "" and data_lines:
+            payload = "\n".join(data_lines)
+            try:
+                data = json.loads(payload)
+            except Exception:
+                data = {"raw": payload}
+            yield (event_type or data.get("type", ""), data)
+            event_type = None
+            data_lines = []
+    if data_lines:
+        payload = "\n".join(data_lines)
+        try:
+            data = json.loads(payload)
+        except Exception:
+            data = {"raw": payload}
+        yield (event_type or data.get("type", ""), data)
+
+
 class ModelNotFoundError(Exception):
     pass
 
@@ -112,6 +141,7 @@ class Provider:
             if str(key).strip() and value is not None
         }
         self.chat_url = self.base_url + "/chat/completions"
+        self.responses_url = self.base_url + "/responses"
         self.models_url = self.base_url + "/models"
 
 
@@ -123,6 +153,11 @@ class Config:
         self.cache_ttl = float(data.get("cache_ttl", 60))
         self.fetch_wait_timeout = float(data.get("fetch_wait_timeout", 30))
         self.max_body_bytes = int(data.get("max_body_bytes", 64 * 1024 * 1024))
+        self.retry_without_tools = bool(data.get("retry_without_tools", True))
+        self.strip_tools = bool(data.get("strip_tools", False))
+        self.stream_mode = str(data.get("stream_mode", "auto")).lower()
+        if self.stream_mode not in ("auto", "stream", "non_stream"):
+            self.stream_mode = "auto"
         self.default_num_ctx = int(data.get("default_num_ctx", 4096))
         self.models_dir = os.path.abspath(
             os.path.join(base_dir, str(data.get("models_dir", "models"))))
@@ -156,6 +191,7 @@ class Proxy:
         self.log_level = config.log_level
         self.lock = threading.RLock()
         self._opener_cache = None
+        self.session_id = uuid.uuid4().hex
         self.model_routes = {}       # Ollama model name(lower) -> (provider name, upstream id)
         self.base_model_routes = {}  # model base(lower) -> first (provider name, upstream id)
         self.fetched_at = {}         # provider name -> 上次 /models 时间
@@ -207,7 +243,11 @@ class Proxy:
     def _qualified_model_name(cls, upstream_id, provider_name):
         base, separator, tag = str(upstream_id).partition(":")
         suffix = cls._provider_tag_suffix(provider_name)
-        return base + ":" + ((tag + "-" + suffix) if separator and tag else suffix)
+        if separator and tag:
+            if tag.lower() == "latest" or tag == suffix:
+                return base + ":" + suffix
+            return base + ":" + tag + "-" + suffix
+        return base + ":" + suffix
 
     def _register_route(self, provider, upstream_id, ollama_name):
         provider_name = provider.name
@@ -246,6 +286,9 @@ class Proxy:
         if provider.api_key:
             headers["Authorization"] = "Bearer " + provider.api_key
         headers.update(provider.headers)
+        session_id = getattr(self, "session_id", "")
+        for key, value in provider.headers.items():
+            headers[key] = str(value).replace("{session_id}", session_id).replace("${session_id}", session_id)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(
             url, data=data, headers=headers,
@@ -273,6 +316,22 @@ class Proxy:
             self.log("upstream 连接错误 provider=%s reason=%s elapsed=%.2fs" % (
                 provider.name, exc.reason, time.time() - started), level="debug")
             raise UpstreamError(0, str(exc.reason)) from exc
+
+    def _retry_without_tools(self, provider, url, payload, exc):
+        """上游 5xx 且请求带 tools 时,剥离 tools 重试一次。"""
+        if not self.config.retry_without_tools or not payload.get("tools") or exc.status not in (500, 502, 503):
+            return None
+        stripped = dict(payload)
+        stripped.pop("tools", None)
+        stripped.pop("tool_choice", None)
+        self.log("上游 %s 错误,剥离 tools 后重试 model=%s provider=%s url=%s" % (
+            exc.status, payload.get("model"), provider.name, url))
+        try:
+            return self.upstream_request(provider, url, stripped)
+        except UpstreamError as retry_exc:
+            self.log("剥离 tools 重试仍失败 model=%s provider=%s status=%s body=%s" % (
+                payload.get("model"), provider.name, retry_exc.status, (retry_exc.body or "")[:200]), level="error")
+            raise retry_exc
 
     # ---------------- 模型列表 ----------------
     def fetch_provider_models(self, provider, force=False):
@@ -409,11 +468,8 @@ class Proxy:
         return None, None
 
     def public_model_name(self, provider, upstream_id):
-        plain = str(upstream_id) if ":" in str(upstream_id) else str(upstream_id) + ":latest"
-        with self.lock:
-            route = self.model_routes.get(plain.lower())
-        if route and route[0] == provider.name and route[1] == str(upstream_id):
-            return plain
+        # 统一命名:<上游模型>:<provider>,不再使用 :latest 作为默认后缀。
+        return self._qualified_model_name(upstream_id, provider.name)
         return self._qualified_model_name(upstream_id, provider.name)
 
     # ---------------- models/*.json 匹配 ----------------
@@ -491,6 +547,170 @@ class Proxy:
             if item["provider"].lower() == provider_l and item["base"].lower() == base_l:
                 return item, item["path"]
         return None, None
+
+    def get_api_type(self, provider, upstream_id):
+        """返回模型 API 类型: 'chat_completions' 或 'responses'。默认 'chat_completions'。"""
+        entry, _path = self.find_models_entry(provider, upstream_id)
+        if entry and isinstance(entry.get("show"), dict):
+            return entry["show"].get("api_type", "chat_completions")
+        return "chat_completions"
+
+    @staticmethod
+    def chat_to_responses_payload(chat_payload):
+        """将 Chat Completions 请求体转换为 Responses API 请求体。"""
+        resp = {"model": chat_payload.get("model", "")}
+        messages = chat_payload.get("messages", [])
+        inp = []
+        system_text = ""
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content")
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "\n".join(text_parts)
+            if not isinstance(content, str):
+                content = str(content) if content is not None else ""
+            if role == "system":
+                system_text += (system_text and "\n" or "") + content
+            else:
+                inp.append({"role": role, "content": content})
+        if system_text:
+            resp["instructions"] = system_text
+        resp["input"] = inp
+        tools = chat_payload.get("tools")
+        if tools:
+            converted_tools = []
+            for tool in tools:
+                fn = tool.get("function", {})
+                converted_tools.append({
+                    "type": "function",
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get("parameters", {}),
+                })
+            resp["tools"] = converted_tools
+        if chat_payload.get("stream") is not None:
+            resp["stream"] = bool(chat_payload["stream"])
+        return resp
+
+    @staticmethod
+    def responses_to_chat_response(resp_data, model_name):
+        """将 Responses API 非流式响应转换为 Chat Completions 格式。"""
+        output_items = resp_data.get("output", [])
+        text_parts = []
+        tool_calls = []
+        tc_index = 0
+        for item in output_items:
+            item_type = item.get("type")
+            if item_type == "message":
+                for part in item.get("content", []):
+                    if part.get("type") == "output_text":
+                        text_parts.append(part.get("text", ""))
+            elif item_type == "function_call":
+                args = item.get("arguments", "{}")
+                try:
+                    json.loads(args)
+                except Exception:
+                    args = "{}"
+                tool_calls.append({
+                    "id": item.get("id", f"call_{tc_index}"),
+                    "type": "function",
+                    "index": tc_index,
+                    "function": {
+                        "name": item.get("name", ""),
+                        "arguments": args,
+                    },
+                })
+                tc_index += 1
+        usage_raw = resp_data.get("usage", {}) or {}
+        usage = {
+            "prompt_tokens": usage_raw.get("input_tokens", 0),
+            "completion_tokens": usage_raw.get("output_tokens", 0),
+            "total_tokens": usage_raw.get("total_tokens", 0),
+        }
+        message = {"role": "assistant", "content": "".join(text_parts) or None}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        finish_reason = "tool_calls" if tool_calls else "stop"
+        return {
+            "id": resp_data.get("id", ""),
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model_name,
+            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+            "usage": usage,
+        }
+
+    def responses_stream_to_v1_sse(self, resp, model_name, client_wants_stream=True):
+        """将 Responses API SSE 流转换为 Chat Completions SSE 流。"""
+        base_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+        usage_data = {}
+        finish_reason = "stop"
+
+        def generate():
+            nonlocal finish_reason, usage_data
+            for event_type, data in iter_sse_events(resp):
+                if event_type == "response.output_text.delta":
+                    delta_text = data.get("delta", "")
+                    if not delta_text:
+                        continue
+                    chunk = {
+                        "id": base_id, "object": "chat.completion.chunk",
+                        "created": created, "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": delta_text}, "finish_reason": None}],
+                    }
+                    yield self._sse_bytes(chunk)
+                elif event_type == "response.output_item.added":
+                    item = data.get("item", {})
+                    if item.get("type") == "function_call":
+                        tc_chunk = {
+                            "id": base_id, "object": "chat.completion.chunk",
+                            "created": created, "model": model_name,
+                            "choices": [{"index": 0, "delta": {"tool_calls": [{
+                                "index": 0,
+                                "id": item.get("id", ""),
+                                "type": "function",
+                                "function": {"name": item.get("name", ""), "arguments": ""},
+                            }]}, "finish_reason": None}],
+                        }
+                        yield self._sse_bytes(tc_chunk)
+                elif event_type == "response.output_item.done":
+                    item = data.get("item", {})
+                    if item.get("type") == "function_call":
+                        args = item.get("arguments", "{}")
+                        tc_chunk = {
+                            "id": base_id, "object": "chat.completion.chunk",
+                            "created": created, "model": model_name,
+                            "choices": [{"index": 0, "delta": {"tool_calls": [{
+                                "index": 0,
+                                "function": {"arguments": args},
+                            }]}, "finish_reason": None}],
+                        }
+                        yield self._sse_bytes(tc_chunk)
+                        finish_reason = "tool_calls"
+                elif event_type == "response.completed":
+                    final_resp = data.get("response", {})
+                    usage_raw = final_resp.get("usage", {}) or {}
+                    usage_data = {
+                        "prompt_tokens": usage_raw.get("input_tokens", 0),
+                        "completion_tokens": usage_raw.get("output_tokens", 0),
+                        "total_tokens": usage_raw.get("total_tokens", 0),
+                    }
+            final_event = {
+                "id": base_id, "object": "chat.completion.chunk",
+                "created": created, "model": model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+            }
+            if usage_data:
+                final_event["usage"] = usage_data
+            yield self._sse_bytes(final_event)
+            yield b"data: [DONE]\n\n"
+
+        return generate()
 
     # ---------------- /api/tags and /api/show responses ----------------
     def tags(self):
@@ -646,6 +866,9 @@ class Proxy:
             params["tools"] = body["tools"]
         if body.get("tool_choice") is not None:
             params["tool_choice"] = body["tool_choice"]
+        if self.config.strip_tools:
+            params.pop("tools", None)
+            params.pop("tool_choice", None)
         return params
 
     def chat(self, body):
@@ -654,19 +877,42 @@ class Proxy:
         provider, upstream = self.resolve_model(ollama_name)
         if provider is None:
             raise ModelNotFoundError("model '%s' not found, try pulling it first" % ollama_name)
-        url = provider.chat_url
+        api_type = self.get_api_type(provider, upstream)
+        url = provider.responses_url if api_type == "responses" else provider.chat_url
         self.log("chat model=%s provider=%s url=%s stream=false" % (ollama_name, provider.name, url))
         payload = self.build_chat_payload(body, upstream)
-        try:
-            resp = self.upstream_request(provider, provider.chat_url, payload)
-        except UpstreamError as exc:
-            self.log("chat 失败 model=%s provider=%s status=%s body=%s" % (
-                ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
-            raise
-        try:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        finally:
+        if api_type == "responses":
+            payload["stream"] = False
+            resp_payload = self.chat_to_responses_payload(payload)
+            try:
+                resp = self.upstream_request(provider, provider.responses_url, resp_payload)
+            except UpstreamError as exc:
+                if resp_payload.get("tools") and self.config.retry_without_tools and exc.status in (500, 502, 503):
+                    retry_payload = dict(resp_payload)
+                    retry_payload.pop("tools", None)
+                    try:
+                        resp = self.upstream_request(provider, provider.responses_url, retry_payload)
+                    except UpstreamError:
+                        raise exc
+                else:
+                    raise
+            raw = resp.read().decode("utf-8", "replace")
             resp.close()
+            resp_data = json.loads(raw)
+            data = self.responses_to_chat_response(resp_data, ollama_name)
+        else:
+            try:
+                resp = self.upstream_request(provider, provider.chat_url, payload)
+            except UpstreamError as exc:
+                resp = self._retry_without_tools(provider, provider.chat_url, payload, exc)
+                if resp is None:
+                    self.log("chat 失败 model=%s provider=%s status=%s body=%s" % (
+                        ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
+                    raise
+            try:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            finally:
+                resp.close()
         out = self.openai_chat_to_ollama(data, ollama_name)
         self.log("chat 完成 model=%s provider=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
             ollama_name, provider.name,
@@ -684,12 +930,50 @@ class Proxy:
         url = provider.chat_url
         self.log("chat model=%s provider=%s url=%s stream=true" % (ollama_name, provider.name, url))
         payload = self.build_chat_payload(body, upstream)
+        api_type = self.get_api_type(provider, upstream)
+        if api_type == "responses":
+            payload["stream"] = True
+            resp_payload = self.chat_to_responses_payload(payload)
+            try:
+                resp = self.upstream_request(provider, provider.responses_url, resp_payload)
+            except UpstreamError as exc:
+                if resp_payload.get("tools") and self.config.retry_without_tools and exc.status in (500, 502, 503):
+                    retry_payload = dict(resp_payload)
+                    retry_payload.pop("tools", None)
+                    try:
+                        resp = self.upstream_request(provider, provider.responses_url, retry_payload)
+                    except UpstreamError:
+                        raise exc
+                else:
+                    raise
+            full_content, tool_calls, usage = [], {}, {}
+            final_reason = "stop"
+            for event_type, event_data in iter_sse_events(resp):
+                if event_type == "response.output_text.delta":
+                    full_content.append(event_data.get("delta", ""))
+                elif event_type == "response.output_item.done":
+                    item = event_data.get("item", {})
+                    if item.get("type") == "function_call":
+                        tc = {"function": {"name": item.get("name",""), "arguments": item.get("arguments","{}")}}
+                        tool_calls[len(tool_calls)] = tc
+                elif event_type == "response.completed":
+                    fr = event_data.get("response", {}).get("usage", {}) or {}
+                    usage = {"prompt_tokens": fr.get("input_tokens",0), "eval_count": fr.get("output_tokens",0)}
+            message = {"role":"assistant","content":"".join(full_content)}
+            write(ndjson({"model": ollama_name, "created_at": now_iso(), "message": message, "done": False}))
+            final = {"model": ollama_name, "created_at": now_iso(), "done": True,
+                     "total_duration": int((time.time()-t0)*1e9),
+                     "prompt_eval_count": usage.get("prompt_tokens",0), "eval_count": usage.get("eval_count",0)}
+            write(ndjson(final))
+            return
         try:
             resp = self.upstream_request(provider, provider.chat_url, payload)
         except UpstreamError as exc:
-            self.log("chat 失败 model=%s provider=%s status=%s body=%s" % (
-                ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
-            raise
+            resp = self._retry_without_tools(provider, provider.chat_url, payload, exc)
+            if resp is None:
+                self.log("chat 失败 model=%s provider=%s status=%s body=%s" % (
+                    ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
+                raise
         full_content, tool_calls, usage = [], {}, {}
         final_reason = "stop"
         try:
@@ -858,16 +1142,34 @@ class Proxy:
         self.log("generate model=%s provider=%s url=%s prompt_len=%d stream=false" % (
             ollama_name, provider.name, url, len(prompt)))
         payload = self.build_generate_payload(body, upstream)
-        try:
-            resp = self.upstream_request(provider, provider.chat_url, payload)
-        except UpstreamError as exc:
-            self.log("generate 失败 model=%s provider=%s status=%s body=%s" % (
-                ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
-            raise
-        try:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        finally:
+        api_type = self.get_api_type(provider, upstream)
+        if api_type == "responses":
+            payload["stream"] = False
+            resp_payload = self.chat_to_responses_payload(payload)
+            try:
+                resp = self.upstream_request(provider, provider.responses_url, resp_payload)
+            except UpstreamError:
+                retry_payload = dict(resp_payload)
+                retry_payload.pop("tools", None)
+                if retry_payload.get("tools") and self.config.retry_without_tools:
+                    resp = self.upstream_request(provider, provider.responses_url, retry_payload)
+                else:
+                    raise
+            raw = resp.read().decode("utf-8", "replace")
             resp.close()
+            resp_data = json.loads(raw)
+            data = self.responses_to_chat_response(resp_data, ollama_name)
+        else:
+            try:
+                resp = self.upstream_request(provider, provider.chat_url, payload)
+            except UpstreamError as exc:
+                self.log("generate 失败 model=%s provider=%s status=%s body=%s" % (
+                    ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
+                raise
+            try:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            finally:
+                resp.close()
         out = self.openai_chat_to_generate(data, ollama_name)
         self.log("generate 完成 model=%s provider=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
             ollama_name, provider.name,
@@ -887,6 +1189,36 @@ class Proxy:
         self.log("generate model=%s provider=%s url=%s prompt_len=%d stream=true" % (
             ollama_name, provider.name, url, len(prompt)))
         payload = self.build_generate_payload(body, upstream)
+        api_type = self.get_api_type(provider, upstream)
+        if api_type == "responses":
+            payload["stream"] = True
+            resp_payload = self.chat_to_responses_payload(payload)
+            try:
+                resp = self.upstream_request(provider, provider.responses_url, resp_payload)
+            except UpstreamError as exc:
+                retry_payload = dict(resp_payload)
+                retry_payload.pop("tools", None)
+                if retry_payload.get("tools") and self.config.retry_without_tools and exc.status in (500, 502, 503):
+                    try:
+                        resp = self.upstream_request(provider, provider.responses_url, retry_payload)
+                    except UpstreamError:
+                        raise exc
+                else:
+                    raise
+            full_text = []
+            usage_data = {}
+            for event_type, event_data in iter_sse_events(resp):
+                if event_type == "response.output_text.delta":
+                    delta = event_data.get("delta", "")
+                    full_text.append(delta)
+                    write(ndjson({"model": ollama_name, "created_at": now_iso(), "response": delta, "done": False}))
+                elif event_type == "response.completed":
+                    fr = event_data.get("response", {}).get("usage", {}) or {}
+                    usage_data = {"prompt_tokens": fr.get("input_tokens",0), "eval_count": fr.get("output_tokens",0)}
+            write(ndjson({"model": ollama_name, "created_at": now_iso(), "response": "", "done": True,
+                          "total_duration": int((time.time()-t0)*1e9),
+                          "prompt_eval_count": usage_data.get("prompt_tokens",0), "eval_count": usage_data.get("eval_count",0)}))
+            return
         try:
             resp = self.upstream_request(provider, provider.chat_url, payload)
         except UpstreamError as exc:
@@ -978,36 +1310,249 @@ class Proxy:
                 })
         return {"object": "list", "data": data}
 
+    def _resolved_upstream_stream(self, client_stream):
+        if self.config.stream_mode == "stream":
+            return True
+        if self.config.stream_mode == "non_stream":
+            return False
+        return bool(client_stream)
+
+    @staticmethod
+    def _sse_bytes(obj):
+        return ("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8")
+
+    def aggregate_v1_stream(self, resp, model_name):
+        """把上游 SSE 流聚合为一次完整的 OpenAI chat.completion 响应。"""
+        usage = {}
+        content = []
+        reasoning = []
+        tool_calls = {}
+        finish_reason = None
+        response_id = ""
+        created = 0
+        try:
+            for payload_text in iter_sse(resp):
+                if not payload_text.strip():
+                    continue
+                try:
+                    chunk = json.loads(payload_text)
+                except Exception:
+                    continue
+                usage = chunk.get("usage") or usage
+                response_id = chunk.get("id") or response_id
+                created = chunk.get("created") or created
+                for choice in chunk.get("choices") or []:
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                    delta = choice.get("delta") or {}
+                    value = delta.get("content")
+                    if value:
+                        content.append(value)
+                    rvalue = delta.get("reasoning_content")
+                    if rvalue:
+                        reasoning.append(rvalue)
+                    for tcd in delta.get("tool_calls") or []:
+                        idx = tcd.get("index", 0)
+                        slot = tool_calls.setdefault(idx, {"function": {"name": "", "arguments": ""}})
+                        fn = tcd.get("function") or {}
+                        slot["function"]["name"] += fn.get("name", "") or ""
+                        slot["function"]["arguments"] += fn.get("arguments", "") or ""
+        finally:
+            resp.close()
+        message = {"role": "assistant", "content": "".join(content)}
+        if reasoning:
+            message["reasoning_content"] = "".join(reasoning)
+        if tool_calls:
+            message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+        return {
+            "id": response_id or "chatcmpl-proxy",
+            "object": "chat.completion",
+            "created": created or int(time.time()),
+            "model": model_name,
+            "choices": [{"index": 0, "message": message,
+                          "finish_reason": finish_reason or "stop", "logprobs": None}],
+            "usage": usage or {},
+        }
+
+    def _json_to_v1_sse(self, data, model_name):
+        """把上游一次性 JSON 应答转为 SSE 事件流,供流式客户端读取。"""
+        data = dict(data)
+        data["model"] = model_name
+        base_id = data.get("id") or "chatcmpl-proxy"
+        created = data.get("created") or int(time.time())
+
+        def generate():
+            for ci, choice in enumerate(data.get("choices") or []):
+                message = choice.get("message") or {}
+                delta = {"role": message.get("role", "assistant")}
+                content = message.get("content")
+                if content:
+                    delta["content"] = content
+                if message.get("reasoning_content"):
+                    delta["reasoning_content"] = message["reasoning_content"]
+                if message.get("tool_calls"):
+                    delta["tool_calls"] = message["tool_calls"]
+                yield self._sse_bytes({
+                    "id": base_id, "object": "chat.completion.chunk", "created": created,
+                    "model": model_name, "choices": [{"index": ci, "delta": delta, "finish_reason": None}],
+                })
+                final_event = {
+                    "id": base_id, "object": "chat.completion.chunk", "created": created,
+                    "model": model_name, "choices": [{"index": ci, "delta": {}, "finish_reason": choice.get("finish_reason") or "stop"}],
+                }
+                if data.get("usage"):
+                    final_event["usage"] = data["usage"]
+                final = self._sse_bytes(final_event)
+                yield final
+            yield b"data: [DONE]\n\n"
+        return generate()
+
+    def _upstream_chat_call(self, provider, upstream_id, payload, stream=None):
+        """统一上游调用入口: 根据 api_type 路由到 chat/completions 或 responses。
+        返回 (response, actual_api_type)。对 responses 模型自动做 payload 转换。"""
+        api_type = self.get_api_type(provider, upstream_id)
+        if stream is not None:
+            payload = dict(payload)
+            payload["stream"] = stream
+        if api_type == "responses":
+            resp_payload = self.chat_to_responses_payload(payload)
+            url = provider.responses_url
+        else:
+            resp_payload = payload
+            url = provider.chat_url
+        try:
+            http_resp = self.upstream_request(provider, url, resp_payload)
+        except UpstreamError as exc:
+            # 对 responses 模型剥离 tools 重试
+            if api_type == "responses" and self.config.retry_without_tools and exc.status in (500, 502, 503) and resp_payload.get("tools"):
+                retry_payload = dict(resp_payload)
+                retry_payload.pop("tools", None)
+                try:
+                    http_resp = self.upstream_request(provider, url, retry_payload)
+                except UpstreamError:
+                    raise exc
+            else:
+                raise
+        return http_resp, api_type
+
     def v1_chat(self, body, stream=False):
         t0 = time.time()
         ollama_name = body.get("model", "")
         provider, upstream = self.resolve_model(ollama_name)
         if provider is None:
             raise ModelNotFoundError("model '%s' not found" % ollama_name)
-        url = provider.chat_url
+        api_type = self.get_api_type(provider, upstream)
+        url = provider.responses_url if api_type == "responses" else provider.chat_url
         self.log("v1/chat model=%s provider=%s url=%s stream=%s" % (
             ollama_name, provider.name, url, "true" if stream else "false"))
         new_body = dict(body)
         new_body["model"] = upstream
-        try:
-            resp = self.upstream_request(provider, provider.chat_url, new_body)
-        except UpstreamError as exc:
-            self.log("v1/chat 失败 model=%s provider=%s status=%s body=%s" % (
-                ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
-            raise
-        if stream:
-            return resp
-        try:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        finally:
-            resp.close()
-        data["model"] = ollama_name
+        client_stream = bool(stream)
+        upstream_stream = self._resolved_upstream_stream(client_stream)
+        if self.config.strip_tools:
+            new_body.pop("tools", None)
+            new_body.pop("tool_choice", None)
+            new_body.pop("parallel_tool_calls", None)
+
+        if api_type == "responses":
+            resp_payload = self.chat_to_responses_payload(new_body)
+            resp_payload["stream"] = upstream_stream
+            try:
+                resp = self.upstream_request(provider, provider.responses_url, resp_payload)
+            except UpstreamError as r_exc:
+                if resp_payload.get("tools") and self.config.retry_without_tools and r_exc.status in (500, 502, 503):
+                    retry_payload = dict(resp_payload)
+                    retry_payload.pop("tools", None)
+                    try:
+                        resp = self.upstream_request(provider, provider.responses_url, retry_payload)
+                    except UpstreamError:
+                        raise r_exc
+                else:
+                    raise
+            if upstream_stream and client_stream:
+                return self.responses_stream_to_v1_sse(resp, ollama_name)
+            elif upstream_stream:
+                raw = resp.read().decode("utf-8", "replace")
+                resp.close()
+                data = self._aggregate_responses_stream(raw)
+                data["model"] = ollama_name
+            else:
+                raw = resp.read().decode("utf-8", "replace")
+                resp.close()
+                resp_data = json.loads(raw)
+                data = self.responses_to_chat_response(resp_data, ollama_name)
+        else:
+            new_body["stream"] = upstream_stream
+            try:
+                resp = self.upstream_request(provider, provider.chat_url, new_body)
+            except UpstreamError as exc:
+                resp = self._retry_without_tools(provider, provider.chat_url, new_body, exc)
+                if resp is None:
+                    self.log("v1/chat 失败 model=%s provider=%s status=%s body=%s" % (
+                        ollama_name, provider.name, exc.status, (exc.body or "")[:200]), level="error")
+                    raise
+            if upstream_stream:
+                if client_stream:
+                    return resp
+                data = self.aggregate_v1_stream(resp, ollama_name)
+            else:
+                try:
+                    data = json.loads(resp.read().decode("utf-8", "replace"))
+                finally:
+                    resp.close()
+                data["model"] = ollama_name
+
         usage = data.get("usage", {}) or {}
         self.log("v1/chat 完成 model=%s provider=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
             ollama_name, provider.name,
             usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
             time.time() - t0))
+        if client_stream and not upstream_stream:
+            return self._json_to_v1_sse(data, ollama_name)
         return data
+
+    def _aggregate_responses_stream(self, sse_text):
+        """聚合 Responses API SSE 文本为完整 Chat Completions JSON。"""
+        text_parts = []
+        tool_calls = []
+        usage_data = {}
+        for line in sse_text.splitlines():
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            try:
+                event_data = json.loads(payload)
+            except Exception:
+                continue
+            etype = event_data.get("type", "")
+            if etype == "response.output_text.delta":
+                text_parts.append(event_data.get("delta", ""))
+            elif etype == "response.output_item.done":
+                item = event_data.get("item", {})
+                if item.get("type") == "function_call":
+                    tool_calls.append(item)
+            elif etype == "response.completed":
+                fr = event_data.get("response", {}).get("usage", {}) or {}
+                usage_data = {
+                    "prompt_tokens": fr.get("input_tokens", 0),
+                    "completion_tokens": fr.get("output_tokens", 0),
+                    "total_tokens": fr.get("total_tokens", 0),
+                }
+        message = {"role": "assistant", "content": "".join(text_parts) or None}
+        finish_reason = "stop"
+        if tool_calls:
+            message["tool_calls"] = [{
+                "id": tc.get("id", f"call_{i}"),
+                "type": "function",
+                "function": {"name": tc.get("name", ""), "arguments": tc.get("arguments", "{}")},
+            } for i, tc in enumerate(tool_calls)]
+            finish_reason = "tool_calls"
+        return {
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+            "usage": usage_data,
+        }
 
 
 class ProxyServer(ThreadingHTTPServer):

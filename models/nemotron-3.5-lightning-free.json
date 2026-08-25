@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "nemotron-3.5-lightning-free",
       "tag": {
-        "name": "nemotron-3.5-lightning-free:latest",
-        "model": "nemotron-3.5-lightning-free:latest",
+        "name": "nemotron-3.5-lightning-free",
+        "model": "nemotron-3.5-lightning-free",
         "modified_at": "2026-08-11T00:00:00Z",
         "size": 65826538624,
         "digest": "",
@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "nemotron.context_length": 262144,
           "nemotron.embedding_length": 2688
         },
-        "modified_at": "2026-08-11T00:00:00Z"
+        "modified_at": "2026-08-11T00:00:00Z",
+        "api_type": "chat_completions"
       }
     }
   }

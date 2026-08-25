@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "muse-spark-1.2",
       "tag": {
-        "name": "muse-spark-1.2:latest",
-        "model": "muse-spark-1.2:latest",
+        "name": "muse-spark-1.2",
+        "model": "muse-spark-1.2",
         "modified_at": "2026-08-05T00:00:00Z",
         "size": 0,
         "digest": "",
@@ -19,7 +19,12 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking", "vision"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking",
+          "vision"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -33,7 +38,8 @@
           "muse.context_length": 1048576,
           "muse.embedding_length": 4096
         },
-        "modified_at": "2026-08-05T00:00:00Z"
+        "modified_at": "2026-08-05T00:00:00Z",
+        "api_type": "responses"
       }
     }
   }

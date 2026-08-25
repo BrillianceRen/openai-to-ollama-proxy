@@ -4,8 +4,8 @@
     "opencode-zen": {
       "model": "hy3-free",
       "tag": {
-        "name": "hy3-free:latest",
-        "model": "hy3-free:latest",
+        "name": "hy3-free",
+        "model": "hy3-free",
         "modified_at": "2026-07-06T00:00:00Z",
         "size": 597572342272,
         "digest": "",
@@ -19,7 +19,11 @@
         }
       },
       "show": {
-        "capabilities": ["completion", "tools", "thinking"],
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ],
         "details": {
           "parent_model": "",
           "format": "",
@@ -34,7 +38,8 @@
           "hy.context_length": 190000,
           "hy.embedding_length": 4096
         },
-        "modified_at": "2026-07-06T00:00:00Z"
+        "modified_at": "2026-07-06T00:00:00Z",
+        "api_type": "chat_completions"
       }
     }
   }

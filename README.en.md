@@ -22,6 +22,7 @@ This project turns OpenAI-compatible APIs (DeepSeek, Zhipu BigModel, Kimi, etc.)
 | `GET /api/version` | Returns a fake Ollama version |
 | `GET /v1/models` | OpenAI-compatible model list |
 | `POST /v1/chat/completions` | Pass-through for OpenAI-compatible requests (streaming supported) |
+| `POST /v1/responses` | OpenAI Responses API pass-through (streaming supported) |
 
 Model naming: every public model is named `<upstream-model>:<provider>`, e.g. `glm-5.2` -> `glm-5.2:bigmodel`,
 `deepseek-v4-flash` -> `deepseek-v4-flash:deepseek` / `deepseek-v4-flash:opencode-zen`.
@@ -85,8 +86,10 @@ curl http://127.0.0.1:11434/v1/models
 - `/v1/chat/completions` supports `stream_mode`: `auto` (follow the client) / `stream` (always stream upstream) / `non_stream` (always non-stream upstream). SSE and JSON are converted automatically when the mode is forced, so clients do not need to change parameters.
 - `providers[].headers` adds custom headers for a provider, e.g. a required `User-Agent`. Headers are merged after Authorization and can override the default Content-Type, Accept, and User-Agent.
 - OpenCode Zen requires the following headers to pass edge validation:
-  `User-Agent: opencode/1.18.21` and `Originator: opencode`.
+  `"Authorization": "Bearer <API KEY>"`.
 - The `x-preview-f-free` model requires the `tools` field to be present in the request; requests without tools consistently return 503 (Endpoint is unavailable) from upstream. The proxy can inject a noop tool to work around this.
+- Model API type is configured via `show.api_type` in `models/*.json`: `"chat_completions"` (default) or `"responses"`. The proxy automatically converts Chat Completions format to/from the Responses API so clients don't need to change anything.
+- `tag.name` and `tag.model` in `models/*.json` no longer need explicit provider suffixes; the proxy auto-generates `<model_id>:<provider>` names.
 - If the Ollama-side name differs from the upstream id, use `mapping`:
 
 ```json
