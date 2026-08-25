@@ -4,6 +4,14 @@ config.json
 # Python 运行时产物
 __pycache__/
 *.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# 依赖与测试缓存
+.pytest_cache/
+.hypothesis/
 
 # 日志
 *.log
