@@ -1,13 +1,14 @@
 """Validate x-preview-f-free model: tools/stream/headers combinations."""
 
 import json
+import os
 import sys
 import time
 import urllib.request
 import urllib.error
 
 BASE_URL = "https://opencode.ai/zen/v1/chat/completions"
-API_KEY = "sk-d4xN6Ce2ZuMid4BJXyciQTECMzyf1JSDgp1sOM7Cz9c9oHBAMFfifQ5vjUDAaOso"
+API_KEY = os.environ.get("OPENCODE_ZEN_API_KEY", "")
 MODEL = "x-preview-f-free"
 SESSION_ID = "test-session-001"
 
