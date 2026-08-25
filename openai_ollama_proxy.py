@@ -111,6 +111,86 @@ def iter_sse_events(resp):
         yield (event_type or data.get("type", ""), data)
 
 
+import re
+
+DSML_OPEN = "<\uff5c\uff5cDSML\uff5c\uff5ctool_calls>"
+DSML_CLOSE = "</\uff5c\uff5cDSML\uff5c\uff5ctool_calls>"
+DSML_INVOKE_RE = re.compile(
+    r'<\uff5c\uff5cDSML\uff5c\uff5cinvoke\s+name="([^"]*)"\s*>'
+    r'(.*?)'
+    r'</\uff5c\uff5cDSML\uff5c\uff5cinvoke>',
+    re.DOTALL,
+)
+DSML_PARAM_RE = re.compile(
+    r'<\uff5c\uff5cDSML\uff5c\uff5cparameter\s+name="([^"]*)"[^>]*>'
+    r'([^<]*)'
+    r'</\uff5c\uff5cDSML\uff5c\uff5cparameter>',
+    re.DOTALL,
+)
+
+NOOP_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "noop",
+            "description": "No-op",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+]
+
+
+def parse_dsml_content(content):
+    """从文本中提取 DeepSeek DSML 工具调用标记。
+
+    返回 (clean_text, tool_calls_list)。clean_text 为去除 DSML 后的纯文本;
+    tool_calls_list 为标准 OpenAI tool_calls 格式(可能为空)。
+    """
+    if not content or DSML_OPEN not in content:
+        return content, []
+    tool_calls = []
+    tc_index = 0
+
+    def _replace_invoke(m):
+        nonlocal tc_index
+        fn_name = m.group(1)
+        body = m.group(2)
+        args = {}
+        for pm in DSML_PARAM_RE.finditer(body):
+            args[pm.group(1)] = pm.group(2).strip()
+        import json as _json
+        tool_calls.append({
+            "id": f"call_dsml_{tc_index}",
+            "type": "function",
+            "index": tc_index,
+            "function": {"name": fn_name, "arguments": _json.dumps(args, ensure_ascii=False)},
+        })
+        tc_index += 1
+        return ""
+
+    # 先替换整个 tool_calls 块内的 invoke
+    def _replace_block(m):
+        return m.group(0)  # placeholder, handled below
+
+    cleaned = content
+    for m in DSML_INVOKE_RE.finditer(content):
+        _replace_invoke(m)
+
+    # 移除整个 DSML 块
+    start = cleaned.find(DSML_OPEN)
+    while start >= 0:
+        end = cleaned.find(DSML_CLOSE, start)
+        if end < 0:
+            cleaned = cleaned[:start]
+            break
+        cleaned = cleaned[:start] + cleaned[end + len(DSML_CLOSE):]
+        start = cleaned.find(DSML_OPEN)
+
+    # 清理多余空白
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+    return cleaned, tool_calls
+
+
 class ModelNotFoundError(Exception):
     pass
 
@@ -129,12 +209,13 @@ class UpstreamError(Exception):
 class Provider:
     """单个 OpenAI 兼容上游。"""
 
-    def __init__(self, name, base_url, api_key, models, family, headers=None):
+    def __init__(self, name, base_url, api_key, models, family, headers=None, require_tools=False):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
         self.models = [str(m).strip() for m in (models or []) if str(m).strip()]
         self.family = family or name
+        self.require_tools = bool(require_tools)
         self.headers = {
             str(key).strip(): str(value)
             for key, value in (headers or {}).items()
@@ -182,6 +263,7 @@ class Config:
                 models=p.get("models"),
                 family=p.get("family"),
                 headers=p.get("headers"),
+                require_tools=p.get("require_tools", False),
             ))
 
 
@@ -319,7 +401,20 @@ class Proxy:
 
     def _retry_without_tools(self, provider, url, payload, exc):
         """上游 5xx 且请求带 tools 时,剥离 tools 重试一次。"""
-        if not self.config.retry_without_tools or not payload.get("tools") or exc.status not in (500, 502, 503):
+        if not self.config.retry_without_tools or exc.status not in (500, 502, 503):
+            return None
+        if getattr(provider, "require_tools", False):
+            retry_payload = dict(payload)
+            retry_payload.setdefault("tools", NOOP_TOOLS)
+            self.log("上游 %s 错误,模型要求 tools,保留工具后重试 model=%s provider=%s url=%s" % (
+                exc.status, retry_payload.get("model"), provider.name, url))
+            try:
+                return self.upstream_request(provider, url, retry_payload)
+            except UpstreamError as retry_exc:
+                self.log("保留工具重试仍失败 model=%s provider=%s status=%s body=%s" % (
+                    retry_payload.get("model"), provider.name, retry_exc.status, (retry_exc.body or "")[:200]), level="error")
+                raise retry_exc
+        if not payload.get("tools"):
             return None
         stripped = dict(payload)
         stripped.pop("tools", None)
@@ -852,7 +947,7 @@ class Proxy:
             params[akey] = val
 
     # ---------------- /api/chat ----------------
-    def build_chat_payload(self, body, upstream_model):
+    def build_chat_payload(self, body, upstream_model, provider=None):
         params = {
             "model": upstream_model,
             "messages": self.convert_messages(body.get("messages", [])),
@@ -866,7 +961,10 @@ class Proxy:
             params["tools"] = body["tools"]
         if body.get("tool_choice") is not None:
             params["tool_choice"] = body["tool_choice"]
-        if self.config.strip_tools:
+        if provider is not None and getattr(provider, "require_tools", False):
+            if not params.get("tools"):
+                params["tools"] = NOOP_TOOLS
+        elif self.config.strip_tools:
             params.pop("tools", None)
             params.pop("tool_choice", None)
         return params
@@ -880,7 +978,7 @@ class Proxy:
         api_type = self.get_api_type(provider, upstream)
         url = provider.responses_url if api_type == "responses" else provider.chat_url
         self.log("chat model=%s provider=%s url=%s stream=false" % (ollama_name, provider.name, url))
-        payload = self.build_chat_payload(body, upstream)
+        payload = self.build_chat_payload(body, upstream, provider)
         if api_type == "responses":
             payload["stream"] = False
             resp_payload = self.chat_to_responses_payload(payload)
@@ -929,7 +1027,7 @@ class Proxy:
             raise ModelNotFoundError("model '%s' not found, try pulling it first" % ollama_name)
         url = provider.chat_url
         self.log("chat model=%s provider=%s url=%s stream=true" % (ollama_name, provider.name, url))
-        payload = self.build_chat_payload(body, upstream)
+        payload = self.build_chat_payload(body, upstream, provider)
         api_type = self.get_api_type(provider, upstream)
         if api_type == "responses":
             payload["stream"] = True
@@ -1055,10 +1153,17 @@ class Proxy:
         content = message.get("content")
         if content is None:
             content = ""
-        omsg = {"role": message.get("role", "assistant"), "content": content}
+        dsml_text, dsml_tool_calls = parse_dsml_content(content)
+        existing_tcs = message.get("tool_calls") or []
+        all_tool_calls = list(existing_tcs) + dsml_tool_calls
+        omsg = {"role": message.get("role", "assistant"), "content": dsml_text}
         done_reason = choice.get("finish_reason") or "stop"
-        if message.get("tool_calls"):
-            omsg["tool_calls"] = Proxy.openai_tool_calls_to_ollama(message["tool_calls"])
+        if all_tool_calls:
+            converted = Proxy.openai_tool_calls_to_ollama(all_tool_calls) if existing_tcs else [
+                {"function": {"name": tc["function"]["name"], "arguments": json.loads(tc["function"]["arguments"])}}
+                for tc in all_tool_calls
+            ]
+            omsg["tool_calls"] = converted
             done_reason = "tool_calls"
         return {
             "model": ollama_name,
@@ -1359,11 +1464,17 @@ class Proxy:
                         slot["function"]["arguments"] += fn.get("arguments", "") or ""
         finally:
             resp.close()
-        message = {"role": "assistant", "content": "".join(content)}
+        raw_text = "".join(content)
+        clean_text, dsml_tool_calls = parse_dsml_content(raw_text)
+        message = {"role": "assistant", "content": clean_text}
         if reasoning:
             message["reasoning_content"] = "".join(reasoning)
-        if tool_calls:
-            message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+        all_tc = [tool_calls[i] for i in sorted(tool_calls)] if tool_calls else []
+        for dtc in dsml_tool_calls:
+            all_tc.append({"function": dtc["function"]})
+        if all_tc:
+            message["tool_calls"] = all_tc
+            finish_reason = finish_reason if finish_reason == "stop" else "tool_calls"
         return {
             "id": response_id or "chatcmpl-proxy",
             "object": "chat.completion",
@@ -1373,6 +1484,137 @@ class Proxy:
                           "finish_reason": finish_reason or "stop", "logprobs": None}],
             "usage": usage or {},
         }
+
+    def _dsml_filtered_v1_stream(self, resp, model_name):
+        """包装上游 SSE 流,实时检测并转换 DeepSeek DSML 工具调用标记。"""
+        base_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+        text_buffer = []
+        dsml_active = False
+        emitted_index = 0
+        finish_reason = None
+        usage_data = {}
+
+        def generate():
+            nonlocal dsml_active, finish_reason, usage_data, emitted_index
+            for payload_text in iter_sse(resp):
+                if not payload_text.strip():
+                    continue
+                try:
+                    chunk = json.loads(payload_text)
+                except Exception:
+                    continue
+                if isinstance(chunk.get("usage"), dict) and chunk["usage"]:
+                    usage_data = chunk["usage"]
+                fr = None
+                for choice in chunk.get("choices") or []:
+                    if choice.get("finish_reason"):
+                        fr = choice["finish_reason"]
+                    delta = choice.get("delta") or {}
+                    value = delta.get("content")
+                    # Forward reasoning_content and tool_calls unchanged
+                    rc = delta.get("reasoning_content")
+                    tc = delta.get("tool_calls")
+                    if rc:
+                        yield self._sse_bytes({
+                            "id": base_id, "object": "chat.completion.chunk",
+                            "created": created, "model": model_name,
+                            "choices": [{"index": 0, "delta": {"reasoning_content": rc}, "finish_reason": None}],
+                        })
+                    if tc:
+                        yield self._sse_bytes(chunk)
+                        continue
+                    if value is None:
+                        continue
+                    text_buffer.append(value)
+                    full = "".join(text_buffer)
+                    if DSML_OPEN in full:
+                        # Split into pre-DSML clean text and DSML portion
+                        idx = full.find(DSML_OPEN)
+                        clean_part = full[:idx]
+                        if clean_part and not dsml_active:
+                            # Emit only unemitted portion of clean_part
+                            emit = clean_part[emitted_index:]
+                            if emit:
+                                yield self._sse_bytes({
+                                    "id": base_id, "object": "chat.completion.chunk",
+                                    "created": created, "model": model_name,
+                                    "choices": [{"index": 0, "delta": {"content": emit}, "finish_reason": None}],
+                                })
+                                emitted_index += len(emit)
+                            dsml_active = True
+                            # Reset buffer to just the DSML part
+                            text_buffer.clear()
+                            text_buffer.append(full[idx:])
+                    elif dsml_active:
+                        # Still accumulating DSML block
+                        pass
+                    elif DSML_OPEN[:8] in full[-20:]:
+                        # Partial match at end - hold back last few chars
+                        safe_emit_len = max(0, len(full) - 20)
+                        emit = full[emitted_index:safe_emit_len + emitted_index]
+                        # Actually just emit up to len(full)-len(DSML_OPEN)+1
+                        holdback = min(len(DSML_OPEN), 20)
+                        emit_end = max(0, len(full) - holdback)
+                        emit = full[emitted_index:emit_end]
+                        if emit:
+                            yield self._sse_bytes({
+                                "id": base_id, "object": "chat.completion.chunk",
+                                "created": created, "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": emit}, "finish_reason": None}],
+                            })
+                            emitted_index += len(emit)
+                    else:
+                        # No DSML detected, emit everything
+                        emit = full[emitted_index:]
+                        if emit:
+                            yield self._sse_bytes({
+                                "id": base_id, "object": "chat.completion.chunk",
+                                "created": created, "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": emit}, "finish_reason": None}],
+                            })
+                            emitted_index += len(emit)
+                if fr:
+                    finish_reason = fr
+
+            # Stream ended - process remaining buffered text
+            remaining = "".join(text_buffer)
+            if dsml_active or DSML_CLOSE in remaining or DSML_OPEN in remaining:
+                clean_text, dsml_tool_calls = parse_dsml_content(remaining)
+            else:
+                clean_text = remaining[emitted_index:] if len(remaining) > emitted_index else ""
+                dsml_tool_calls = []
+            if clean_text:
+                emit = clean_text[emitted_index:] if len(clean_text) > emitted_index else ""
+                if emit:
+                    yield self._sse_bytes({
+                        "id": base_id, "object": "chat.completion.chunk",
+                        "created": created, "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": emit}, "finish_reason": None}],
+                    })
+            if dsml_tool_calls:
+                yield self._sse_bytes({
+                    "id": base_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {"tool_calls": [
+                        {"index": i, "type": "function",
+                         "id": tc.get("id",""),
+                         "function": tc.get("function", {})}
+                        for i, tc in enumerate(dsml_tool_calls)
+                    ]}, "finish_reason": None}],
+                })
+                finish_reason = "tool_calls"
+            final_event = {
+                "id": base_id, "object": "chat.completion.chunk",
+                "created": created, "model": model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason or "stop"}],
+            }
+            if usage_data:
+                final_event["usage"] = usage_data
+            yield self._sse_bytes(final_event)
+            yield b"data: [DONE]\n\n"
+
+        return generate()
 
     def _json_to_v1_sse(self, data, model_name):
         """把上游一次性 JSON 应答转为 SSE 事件流,供流式客户端读取。"""
@@ -1449,7 +1691,10 @@ class Proxy:
         new_body["model"] = upstream
         client_stream = bool(stream)
         upstream_stream = self._resolved_upstream_stream(client_stream)
-        if self.config.strip_tools:
+        if getattr(provider, "require_tools", False):
+            if not new_body.get("tools"):
+                new_body["tools"] = NOOP_TOOLS
+        elif self.config.strip_tools:
             new_body.pop("tools", None)
             new_body.pop("tool_choice", None)
             new_body.pop("parallel_tool_calls", None)
@@ -1493,7 +1738,7 @@ class Proxy:
                     raise
             if upstream_stream:
                 if client_stream:
-                    return resp
+                    return self._dsml_filtered_v1_stream(resp, ollama_name)
                 data = self.aggregate_v1_stream(resp, ollama_name)
             else:
                 try:
@@ -1583,6 +1828,13 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- 基础 IO ----------------
     def log(self, message, level="info"):
         self.server.proxy.log(message, level)
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+            self.log("客户端提前断开连接 %s" % exc, level="debug")
+            self.close_connection = True
 
     def _debug_headers(self):
         wanted = ("User-Agent", "Content-Type", "Accept", "Authorization",

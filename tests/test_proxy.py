@@ -157,7 +157,7 @@ def test_qualified_model_name_appends_provider():
     q = Proxy._qualified_model_name("glm-5.2", "bigmodel")
     assert q == "glm-5.2:bigmodel"
     q2 = Proxy._qualified_model_name("glm-5.2:latest", "bigmodel")
-    assert q2 == "glm-5.2:latest-bigmodel"
+    assert q2 == "glm-5.2:bigmodel"
 
 
 # --------------------------------------------------------------------------- Config / Provider
@@ -369,19 +369,19 @@ def test_tags_lists_models(tmp_path):
     proxy = build_proxy(tmp_path)
     result = proxy.tags()
     names = [m["name"] for m in result["models"]]
-    assert "deepseek-v4-flash:latest" in names
+    assert "deepseek-v4-flash:deepseek" in names
     assert all(m["details"]["family"] for m in result["models"])
 
 
 def test_tags_qualifies_shared_upstream_ids(tmp_path):
     # Two providers expose the same upstream model id — each can't own the bare
-    # ':latest' name, so the second is surfaced under a provider-qualified name.
+    # Each provider exposes the model under its own provider-qualified name.
     proxy = build_proxy(tmp_path, providers=[
         {"name": "a", "base_url": "http://x/", "models": ["model-x"]},
         {"name": "b", "base_url": "http://y/", "models": ["model-x"]}])
     result = proxy.tags()
     names = sorted(m["name"] for m in result["models"])
-    assert names == ["model-x:b", "model-x:latest"]
+    assert names == ["model-x:a", "model-x:b"]
 
 
 def test_show_for_auto_generates(tmp_path):
@@ -683,6 +683,24 @@ def test_send_error_json_ollama_shape(tmp_path):
     fake.send_json = lambda obj, status=200, headers=None: sent.update(obj=obj, status=status)
     Handler.send_error_json(fake, "boom", 404)
     assert sent["obj"] == {"error": "boom"}
+
+
+def test_handler_suppresses_client_connection_abort(tmp_path):
+    proxy = build_proxy(tmp_path)
+
+    class AbortFile:
+        def readline(self, *args):
+            raise ConnectionAbortedError("client closed keep-alive")
+
+    class AbortHandler(Handler):
+        pass
+
+    handler = AbortHandler.__new__(AbortHandler)
+    handler.close_connection = False
+    handler.log = lambda *args, **kwargs: None
+    handler.rfile = AbortFile()
+    Handler.handle_one_request(handler)
+    assert handler.close_connection is True
 
 
 # --------------------------------------------------------------------------- CLI
