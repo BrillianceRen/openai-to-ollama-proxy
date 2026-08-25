@@ -5,6 +5,9 @@
   "cache_ttl": 60,
   "fetch_wait_timeout": 30,
   "max_body_bytes": 67108864,
+  "retry_without_tools": true,
+  "strip_tools": false,
+  "stream_mode": "auto",
   "default_num_ctx": 4096,
   "models_dir": "models",
   "use_env_proxy": true,
@@ -38,7 +41,10 @@
       "family": "opencode",
       "models": [],
       "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36"
+        "User-Agent": "opencode/1.18.21",
+        "Originator": "opencode",
+        "Authorization": "Bearer 请填入你的OpenCodeZenKey",
+        "Content-Type": "application/json"
       }
     }
   ],

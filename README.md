@@ -26,7 +26,9 @@
 | `GET /v1/models` | OpenAI 兼容模型列表 |
 | `POST /v1/chat/completions` | OpenAI 兼容请求透传(支持流式) |
 
-模型名规则:上游模型 id 自动补 `:latest`,例如上游 `glm-5.2` -> Ollama 侧 `glm-5.2:latest`。
+模型名规则:所有模型统一命名为 `<上游模型>:<provider>`,例如 `glm-5.2` -> `glm-5.2:bigmodel`、
+`deepseek-v4-flash` -> `deepseek-v4-flash:deepseek` / `deepseek-v4-flash:opencode-zen`。
+不再以 `:latest` 结尾;为兼容旧请求,仍接受 `:latest` 路由,但不再出现在列表。
 
 - 支持任意多组 provider(DeepSeek / 智谱 BigModel / Kimi / OpenCode Zen 等),模型列表
   动态拉取并缓存;过期后立即返回旧缓存并后台刷新,列表请求不会被上游 `/models` 阻塞。
@@ -60,6 +62,9 @@ curl http://127.0.0.1:11434/v1/models
   "cache_ttl": 60,            // /models 列表缓存时间(秒)
   "fetch_wait_timeout": 30,   // 首次拉取模型列表的最长等待(秒,默认 30)
   "max_body_bytes": 67108864, // 请求体大小上限(字节,默认 64 MB)
+  "retry_without_tools": true, // 上游 5xx 且带 tools 时,剥离 tools 重试一次
+  "strip_tools": false,       // 暂时彻底禁用 tools,始终剥离后再发送
+  "stream_mode": "auto",       // /v1 流式控制: auto / stream / non_stream
   "default_num_ctx": 4096,    // 自动生成应答时的默认上下文长度
   "models_dir": "models",     // models/*.json 所在目录(相对配置文件)
   "use_env_proxy": true,      // 是否走系统环境代理
@@ -82,18 +87,25 @@ curl http://127.0.0.1:11434/v1/models
   动态拉取列表(带 `cache_ttl` 缓存);也可以手写模型 id 列表固定展示。
 - `cache_ttl` 过期后,`/api/tags` 会立即返回旧缓存并在后台刷新,不阻塞请求;
   启动时自动并行预热所有 provider,`fetch_wait_timeout` 控制首次拉取的最长等待。
+- 上游对带 tools 的请求返回 5xx 时,代理会自动剥离 `tools` / `tool_choice` 重试一次,
+  用于临时绕过上游 tools 端点故障(`retry_without_tools`,默认开启)。
+- 若模型上游 tools 端点长期不可用,可设 `strip_tools: true` 彻底禁用 tools:`/api/chat` 与
+  `/v1/chat/completions` 发送前都会剥离 `tools` / `tool_choice`。
+- `/v1/chat/completions` 可用 `stream_mode` 控制上游请求:`auto`(跟随客户端)/ `stream`(强制流式)/
+  `non_stream`(强制非流式);强制切换时会自动在 SSE 与 JSON 之间转换,客户端无需改参数。
 - `providers[].headers` 可为某个 provider 添加自定义请求头,例如被上游要求特定
   `User-Agent` 时配置 `{"User-Agent": "..."}`。这些头会在 Authorization 之后合并,
   可覆盖默认 Content-Type、Accept 和 User-Agent。
-- OpenCode Zen 需要 Python 侧携带常规浏览器 `User-Agent` 才能通过边缘校验;
-  实测 `opencode/latest/...` 虽可访问模型列表,但会让 `x-preview-f-free`
-  对话上游返回 503,因此默认配置使用浏览器 UA。
+- OpenCode Zen 需要以下请求头才能通过上游边缘校验:
+  `User-Agent: opencode/1.18.21` 和 `Originator: opencode`。
+- `x-preview-f-free` 模型要求请求中必须包含 `tools` 字段;不带 tools 的请求
+  上游会稳定返回 503(Endpoint is unavailable)。代理层可自动注入 noop tool 规避。
 - 若上游 id 与 Ollama 侧名字不一致,可用 `mapping` 显式指定:
 
 ```json
 "mapping": {
-  "glm-5.2:latest": { "provider": "bigmodel", "model": "glm-5.2" },
-  "deepseek-chat:latest": { "provider": "deepseek", "model": "deepseek-chat" }
+  "glm-5.2:bigmodel": { "provider": "bigmodel", "model": "glm-5.2" },
+  "deepseek-chat:deepseek": { "provider": "deepseek", "model": "deepseek-chat" }
 }
 ```
 
@@ -108,7 +120,7 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 3. 服务地址填写本代理地址:`http://127.0.0.1:11434`;
 4. 点击 **添加 / 连接**,Visual Studio 会请求 `/api/tags` 拉取模型列表
    (优先使用 `models/*.json`,未命中自动生成);
-5. 勾选需要的模型(如 `glm-5.2:latest`、`deepseek-chat:latest`)并保存;
+5. 勾选需要的模型(如 `glm-5.2:bigmodel`、`deepseek-chat:deepseek`)并保存;
 6. 之后在 Copilot 的模型下拉框中即可选择这些模型进行对话。
 
 配置完成后,Visual Studio 通过 `/api/show` 获取模型信息、通过 `/api/chat`
@@ -146,8 +158,8 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 - 同一个模型文件可以包含多个 provider，每个 provider 的参数、上下文和能力可以不同。
 
 当多个 provider 暴露同一个上游模型 ID 时，代理会保留第一个 provider 的默认名
-（如 `deepseek-v4-flash:latest`），其他 provider 使用带 provider 后缀的 tag
-（如 `deepseek-v4-flash:opencode-zen`）。这些名称会同时出现在 `/api/tags`
+每个 provider 的模型都会使用 `<上游模型>:<provider>` 形式,例如
+`deepseek-v4-flash:deepseek` 与 `deepseek-v4-flash:opencode-zen`。这些名称会同时出现在 `/api/tags`
 和 `/v1/models` 中，并在请求时精确路由回对应 provider。
 
 ## 安装为命令(pip / console script)
@@ -191,8 +203,8 @@ chunked / 超限)以及 CLI 参数。
 例如:
 
 ```text
-[12:00:01] chat model=glm-5.2:latest provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
-[12:00:03] chat 完成 model=glm-5.2:latest provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
+[12:00:01] chat model=glm-5.2:bigmodel provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
+[12:00:03] chat 完成 model=glm-5.2:bigmodel provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
 [12:00:04] 127.0.0.1 "POST /api/chat HTTP/1.1" 200 - 3.1s
 ```
 

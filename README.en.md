@@ -23,7 +23,9 @@ This project turns OpenAI-compatible APIs (DeepSeek, Zhipu BigModel, Kimi, etc.)
 | `GET /v1/models` | OpenAI-compatible model list |
 | `POST /v1/chat/completions` | Pass-through for OpenAI-compatible requests (streaming supported) |
 
-Model naming: an upstream model id without a tag gets `:latest` appended, e.g. upstream `glm-5.2` -> Ollama-side `glm-5.2:latest`.
+Model naming: every public model is named `<upstream-model>:<provider>`, e.g. `glm-5.2` -> `glm-5.2:bigmodel`,
+`deepseek-v4-flash` -> `deepseek-v4-flash:deepseek` / `deepseek-v4-flash:opencode-zen`.
+Names no longer end with `:latest`; `:latest` routes are still accepted for compatibility but not exposed.
 
 - Any number of providers are supported (DeepSeek, Zhipu BigModel, Kimi, OpenCode Zen, etc.). Model lists are fetched dynamically and cached; stale caches are returned immediately while a background refresh runs, so list requests are never blocked by upstream `/models`.
 - `models/*.json` stores official Ollama response templates per provider; the same model name can have different parameters, context length, and capabilities under different providers.
@@ -55,6 +57,9 @@ curl http://127.0.0.1:11434/v1/models
   "cache_ttl": 60,            // /models list cache TTL (seconds)
   "fetch_wait_timeout": 30,   // max wait for the first model list fetch (seconds, default 30)
   "max_body_bytes": 67108864, // request body size limit (bytes, default 64 MB)
+  "retry_without_tools": true, // retry once without tools on upstream 5xx for tool requests
+  "strip_tools": false,       // temporarily disable tools entirely, always strip before sending
+  "stream_mode": "auto",       // /v1 stream control: auto / stream / non_stream
   "default_num_ctx": 4096,    // default context length for generated responses
   "models_dir": "models",     // models/*.json directory (relative to the config file)
   "use_env_proxy": true,      // use system environment proxy
@@ -75,14 +80,19 @@ curl http://127.0.0.1:11434/v1/models
 
 - When `providers[].models` is empty, `/api/tags` and `/v1/models` fetch the list dynamically from upstream `/v1/models` (cached for `cache_ttl` seconds). You can also hard-code model ids to pin the list.
 - After `cache_ttl` expires, `/api/tags` immediately returns the stale cache and refreshes in the background; all providers are warmed up in parallel at startup, and `fetch_wait_timeout` caps the wait for the first fetch.
+- When an upstream returns 5xx for a request with tools, the proxy retries once after stripping `tools` / `tool_choice`, which works around temporary upstream tool-endpoint failures (`retry_without_tools`, enabled by default).
+- If the tools endpoint stays unavailable, set `strip_tools: true` to disable tools entirely: `tools` / `tool_choice` are stripped before `/api/chat` and `/v1/chat/completions` are forwarded.
+- `/v1/chat/completions` supports `stream_mode`: `auto` (follow the client) / `stream` (always stream upstream) / `non_stream` (always non-stream upstream). SSE and JSON are converted automatically when the mode is forced, so clients do not need to change parameters.
 - `providers[].headers` adds custom headers for a provider, e.g. a required `User-Agent`. Headers are merged after Authorization and can override the default Content-Type, Accept, and User-Agent.
-- OpenCode Zen requires a normal browser-like `User-Agent` to pass edge validation; `opencode/latest/...` works for the model list but makes `x-preview-f-free` chat return 503, so the example config uses a browser UA.
+- OpenCode Zen requires the following headers to pass edge validation:
+  `User-Agent: opencode/1.18.21` and `Originator: opencode`.
+- The `x-preview-f-free` model requires the `tools` field to be present in the request; requests without tools consistently return 503 (Endpoint is unavailable) from upstream. The proxy can inject a noop tool to work around this.
 - If the Ollama-side name differs from the upstream id, use `mapping`:
 
 ```json
 "mapping": {
-  "glm-5.2:latest": { "provider": "bigmodel", "model": "glm-5.2" },
-  "deepseek-chat:latest": { "provider": "deepseek", "model": "deepseek-chat" }
+  "glm-5.2:bigmodel": { "provider": "bigmodel", "model": "glm-5.2" },
+  "deepseek-chat:deepseek": { "provider": "deepseek", "model": "deepseek-chat" }
 }
 ```
 
@@ -94,7 +104,7 @@ The GitHub Copilot built into Visual Studio does not accept a raw OpenAI-compati
 2. Click **Add model / Add provider** and select **Ollama**.
 3. Enter the proxy address: `http://127.0.0.1:11434`.
 4. Click **Add / Connect**; Visual Studio calls `/api/tags` to load the model list (templates from `models/*.json` first, auto-generated otherwise).
-5. Tick the models you need (e.g. `glm-5.2:latest`, `deepseek-chat:latest`) and save.
+5. Tick the models you need (e.g. `glm-5.2:bigmodel`, `deepseek-chat:deepseek`) and save.
 6. The models now appear in the Copilot model dropdown for chat.
 
 After setup, Visual Studio fetches model info via `/api/show` and chats via `/api/chat`; the proxy converts Ollama requests to OpenAI-compatible requests and forwards them to the provider configured in `config.json`.
@@ -127,7 +137,7 @@ After setup, Visual Studio fetches model info via `/api/show` and chats via `/ap
 - Each entry's `model` is the upstream model id sent to that provider; when omitted, the file name is used.
 - One model file can contain multiple providers, each with different parameters, context, and capabilities.
 
-When multiple providers expose the same upstream model id, the first provider keeps the default name (e.g. `deepseek-v4-flash:latest`) and the others get a provider-suffixed tag (e.g. `deepseek-v4-flash:opencode-zen`). These names appear in both `/api/tags` and `/v1/models` and route back to the correct provider on request.
+Every provider exposes models as `<upstream-model>:<provider>`, e.g. `deepseek-v4-flash:deepseek` and `deepseek-v4-flash:opencode-zen`. These names appear in both `/api/tags` and `/v1/models` and route back to the exact provider on request.
 
 ## Install as a Command (pip / console script)
 
@@ -167,8 +177,8 @@ Coverage: `/api/tags`, `/api/show`, `/api/chat`, `/api/generate`, `/v1/*` end-to
 `info` is the default level. Every request logs model, provider, upstream URL, token usage, and elapsed time:
 
 ```text
-[12:00:01] chat model=glm-5.2:latest provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
-[12:00:03] chat 完成 model=glm-5.2:latest provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
+[12:00:01] chat model=glm-5.2:bigmodel provider=bigmodel url=https://open.bigmodel.cn/api/paas/v4/chat/completions stream=false
+[12:00:03] chat 完成 model=glm-5.2:bigmodel provider=bigmodel prompt_tokens=12 completion_tokens=87 elapsed=2.1s
 [12:00:04] 127.0.0.1 "POST /api/chat HTTP/1.1" 200 - 3.1s
 ```
 
