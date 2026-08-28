@@ -72,6 +72,7 @@ curl http://127.0.0.1:11434/v1/models
       "api_key": "sk-xxx",
       "family": "deepseek",                   // family used for generated responses (optional)
       "headers": {},                          // extra upstream headers (optional)
+      "enabled": true,                        // set to false to skip this provider (default true)
       "models": []                            // empty = discover dynamically via upstream /v1/models
     }
   ],
@@ -80,6 +81,7 @@ curl http://127.0.0.1:11434/v1/models
 ```
 
 - When `providers[].models` is empty, `/api/tags` and `/v1/models` fetch the list dynamically from upstream `/v1/models` (cached for `cache_ttl` seconds). You can also hard-code model ids to pin the list.
+- `providers[].enabled` controls one upstream. Omit it or set it to `true` to enable the provider; set it to `false` to skip model discovery, route registration, `/api/tags`, and `/v1/models`.
 - After `cache_ttl` expires, `/api/tags` immediately returns the stale cache and refreshes in the background; all providers are warmed up in parallel at startup, and `fetch_wait_timeout` caps the wait for the first fetch.
 - When an upstream returns 5xx for a request with tools, the proxy retries once after stripping `tools` / `tool_choice`, which works around temporary upstream tool-endpoint failures (`retry_without_tools`, enabled by default).
 - If the tools endpoint stays unavailable, set `strip_tools: true` to disable tools entirely: `tools` / `tool_choice` are stripped before `/api/chat` and `/v1/chat/completions` are forwarded.
@@ -116,29 +118,48 @@ After setup, Visual Studio fetches model info via `/api/show` and chats via `/ap
 
 ## models/ Directory
 
-`models/*.json` stores Ollama `/api/tags` + `/api/show` response templates per provider. The template body follows the official Ollama response fields; the outer `providers` object is used only for association and routing.
+`models/<provider>.json` stores model metadata per provider. The proxy uses it to build Ollama `/api/tags` and `/api/show` responses. The legacy outer `providers` template remains compatible, but new data should use this shape.
 
 ```json
 {
-  "version": 1,
-  "providers": {
-    "opencode-zen": {
+  "provider": "opencode-zen",
+  "defaults": {
+    "capabilities": ["completion", "tools"],
+    "context_length": 128000,
+    "embedding_length": 2048
+  },
+  "models": [
+    {
+      "name": "deepseek-v4-flash",
       "model": "deepseek-v4-flash",
-      "tag": { "...": "GET /api/tags entry" },
-      "show": { "...": "POST /api/show response" }
+      "digest": "0123456789ab",
+      "size": 0,
+      "capabilities": ["completion", "thinking", "tools"],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "deepseek",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "deepseek",
+        "general.parameter_count": null,
+        "deepseek.context_length": 128000,
+        "deepseek.embedding_length": 2048
+      },
+      "modified_at": "2026-08-27T00:00:00Z",
+      "api_type": "chat_completions"
     },
-    "deepseek": {
-      "model": "deepseek-v4-flash",
-      "tag": { "...": "may differ from the above" },
-      "show": { "...": "may differ from the above" }
-    }
-  }
+    ...
+  ]
 }
 ```
 
-- The keys of `providers` must equal the `config.json.providers[].name` values.
-- Each entry's `model` is the upstream model id sent to that provider; when omitted, the file name is used.
-- One model file can contain multiple providers, each with different parameters, context, and capabilities.
+- The filename must equal a `config.json.providers[].name`, as must the top-level `provider`.
+- For each model, `model` is the upstream ID sent to that provider and `name` becomes the public model name.
+- `defaults` are used only when a value cannot be matched or inferred; concrete model values take priority.
 
 Every provider exposes models as `<upstream-model>:<provider>`, e.g. `deepseek-v4-flash:deepseek` and `deepseek-v4-flash:opencode-zen`. These names appear in both `/api/tags` and `/v1/models` and route back to the exact provider on request.
 

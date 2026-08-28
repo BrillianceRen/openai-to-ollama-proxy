@@ -209,12 +209,14 @@ class UpstreamError(Exception):
 class Provider:
     """单个 OpenAI 兼容上游。"""
 
-    def __init__(self, name, base_url, api_key, models, family, headers=None, require_tools=False):
+    def __init__(self, name, base_url, api_key, models, family,
+                 headers=None, require_tools=False, enabled=True):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
         self.models = [str(m).strip() for m in (models or []) if str(m).strip()]
         self.family = family or name
+        self.enabled = bool(enabled)
         self.require_tools = bool(require_tools)
         self.headers = {
             str(key).strip(): str(value)
@@ -256,6 +258,8 @@ class Config:
             base_url = str(p.get("base_url", "")).strip()
             if not name or not base_url:
                 raise ValueError("每个 provider 都必须包含 name 和 base_url")
+            if not p.get("enabled", True):
+                continue
             self.providers.append(Provider(
                 name=name,
                 base_url=base_url,
@@ -264,6 +268,7 @@ class Config:
                 family=p.get("family"),
                 headers=p.get("headers"),
                 require_tools=p.get("require_tools", False),
+                enabled=p.get("enabled", True),
             ))
 
 
@@ -279,6 +284,7 @@ class Proxy:
         self.fetched_at = {}         # provider name -> 上次 /models 时间
         self.fetched_ids = {}        # provider name -> [model ids]
         self.models_entries = None
+        self.models_defaults = {}
         self.fetch_wait = threading.Condition(self.lock)
         self.fetching = set()
         self.refreshing = set()
@@ -331,6 +337,42 @@ class Proxy:
             return base + ":" + tag + "-" + suffix
         return base + ":" + suffix
 
+    @staticmethod
+    def _infer_model_family(name):
+        """根据常见命名推演 family；推演不出时返回空字符串。"""
+        value = str(name).lower().replace("_", "-")
+        rules = (
+            ("paligemma", "paligemma"),
+            ("nemotron", "nemotron"),
+            ("deepseek", "deepseek"),
+            ("minimax", "minimax"),
+            ("step-", "step"),
+            ("ising-calibration", "gemma4"),
+            ("gemma", "gemma"),
+            ("glm", "glm"),
+            ("qwen", "qwen"),
+            ("muse", "muse"),
+            ("llama", "llama"),
+            ("gpt-oss", "gptoss"),
+            ("gpt", "gpt"),
+            ("claude", "claude"),
+        )
+        for needle, family in rules:
+            if needle in value:
+                return family
+        return ""
+
+    @staticmethod
+    def _number(value):
+        """尽量转成整数量纲；不合法时返回 None。"""
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(number) if number.is_integer() else number
+
     def _register_route(self, provider, upstream_id, ollama_name):
         provider_name = provider.name
         route = (provider_name, str(upstream_id))
@@ -359,6 +401,11 @@ class Proxy:
             provider = self.get_provider(item["provider"])
             if provider:
                 self._register_provider_model(provider, item["upstream"])
+                if isinstance(item.get("data"), dict) and item["data"] and item.get("name"):
+                    self._register_route(provider, item["upstream"], item["name"])
+                    self._register_route(
+                        provider, item["upstream"],
+                        self._qualified_model_name(item["name"], provider.name))
 
     def upstream_request(self, provider, url, payload=None):
         headers = {
@@ -565,7 +612,6 @@ class Proxy:
     def public_model_name(self, provider, upstream_id):
         # 统一命名:<上游模型>:<provider>,不再使用 :latest 作为默认后缀。
         return self._qualified_model_name(upstream_id, provider.name)
-        return self._qualified_model_name(upstream_id, provider.name)
 
     # ---------------- models/*.json 匹配 ----------------
     # ---------------- provider-scoped models/*.json matching ----------------
@@ -578,14 +624,32 @@ class Proxy:
                         if filename.lower().endswith(".json"):
                             files.append(os.path.join(root, filename))
             entries = []
+            def add_entry(item):
+                key = (item["provider"].lower(), item["upstream"].lower())
+                index = next((i for i, existing in enumerate(entries)
+                              if (existing["provider"].lower(),
+                                  existing["upstream"].lower()) == key), None)
+                if index is None:
+                    entries.append(item)
+                elif isinstance(item.get("data"), dict) and item["data"]:
+                    # 新 provider 文件优先于仍留在目录里的旧版 per-model 模板。
+                    entries[index] = item
+
             for path in files:
                 data = self.load_models_file(path)
                 if not isinstance(data, dict):
                     continue
                 stem = os.path.splitext(os.path.basename(path))[0]
+                defaults = data.get("defaults") or data.get("default_model") or {}
+                if isinstance(defaults, dict) and defaults and data.get("provider"):
+                    self.models_defaults[str(data["provider"])] = defaults
+                api_type = data.get("api_type")
                 providers = data.get("providers")
                 if isinstance(providers, dict):
                     scoped_entries = providers.items()
+                elif data.get("provider") and isinstance(data.get("models"), list):
+                    # 新格式:一个 provider 一个文件,models 数组保存多个模型。
+                    scoped_entries = [(data.get("provider"), data)]
                 elif data.get("provider"):
                     scoped_entries = [(data.get("provider"), {
                         "model": data.get("model") or stem,
@@ -594,20 +658,47 @@ class Proxy:
                     })]
                 else:
                     continue
+
                 for provider_name, entry in scoped_entries:
                     if not isinstance(provider_name, str) or not isinstance(entry, dict):
                         continue
+
+                    if isinstance(entry.get("models"), list):
+                        for model in entry["models"]:
+                            if not isinstance(model, dict):
+                                continue
+                            upstream_id = str(model.get("model") or model.get("name") or stem)
+                            tag_name = str(model.get("name") or self._model_base(upstream_id))
+                            add_entry({
+                                "provider": provider_name,
+                                "upstream": upstream_id,
+                                "base": self._model_base(upstream_id),
+                                "name": tag_name,
+                                "stem": stem,
+                                "data": model,
+                                "tag": {},
+                                "show": {},
+                                "api_type": model.get("api_type") or api_type,
+                                "defaults": defaults,
+                                "path": path,
+                            })
+                        continue
+
                     upstream_id = str(entry.get("model") or stem)
                     tag = entry.get("tag") or entry.get("tag_model") or {}
                     tag_name = str(tag.get("name") or tag.get("model") or upstream_id)
-                    entries.append({
+                    show = entry.get("show") or {}
+                    add_entry({
                         "provider": provider_name,
                         "upstream": upstream_id,
                         "base": self._model_base(upstream_id),
                         "name": tag_name,
                         "stem": stem,
+                        "data": {},
                         "tag": tag,
-                        "show": entry.get("show"),
+                        "show": show,
+                        "api_type": api_type if api_type is not None else show.get("api_type"),
+                        "defaults": defaults,
                         "path": path,
                     })
             self.models_entries = entries
@@ -646,8 +737,8 @@ class Proxy:
     def get_api_type(self, provider, upstream_id):
         """返回模型 API 类型: 'chat_completions' 或 'responses'。默认 'chat_completions'。"""
         entry, _path = self.find_models_entry(provider, upstream_id)
-        if entry and isinstance(entry.get("show"), dict):
-            return entry["show"].get("api_type", "chat_completions")
+        if entry and entry.get("api_type"):
+            return str(entry["api_type"])
         return "chat_completions"
 
     @staticmethod
@@ -807,13 +898,26 @@ class Proxy:
 
         return generate()
 
+    def _provider_model_ids(self, provider):
+        """合并远端发现的模型与 provider 静态目录；静态目录可在上游失败时兜底。"""
+        ids = list(self.fetch_provider_models(provider))
+        existing_bases = {self._model_base(mid).lower() for mid in ids}
+        catalog_ids = [item["upstream"] for item in self.list_models_files()
+                       if item["provider"].lower() == provider.name.lower()]
+        for mid in catalog_ids:
+            if mid not in ids and self._model_base(mid).lower() not in existing_bases:
+                ids.append(mid)
+                existing_bases.add(self._model_base(mid).lower())
+        return ids
+
     # ---------------- /api/tags and /api/show responses ----------------
     def tags(self):
         entries, seen = [], set()
         self._fetch_missing_models(self.config.providers)
         for provider in self.config.providers:
-            for mid in self.fetch_provider_models(provider):
-                ollama_name = self.public_model_name(provider, mid)
+            ids = self._provider_model_ids(provider)
+            for mid in ids:
+                ollama_name = self._public_model_name_for(provider, mid)
                 key = ollama_name.lower()
                 if key in seen:
                     continue
@@ -824,60 +928,206 @@ class Proxy:
 
     def tags_entry_for(self, ollama_name, upstream_id, provider):
         entry, path = self.find_models_entry(provider, upstream_id, ollama_name)
-        if entry and isinstance(entry.get("tag"), dict):
-            tag = dict(entry["tag"])
-            tag["name"] = ollama_name
-            tag["model"] = ollama_name
+        if entry is not None:
             self.log("tags model=%s provider=%s source=file(%s)" % (
                 ollama_name, provider.name, os.path.basename(path)), level="debug")
-            return tag
-        return self.generate_tag_entry(ollama_name, provider)
+            return self._tags_response(entry, ollama_name)
+        return self.generate_tag_entry(ollama_name, provider, upstream_id)
 
-    def generate_tag_entry(self, ollama_name, provider):
+    def _public_model_name_for(self, provider, upstream_id):
+        entry, _path = self.find_models_entry(provider, upstream_id)
+        display_name = entry.get("name") if entry else ""
+        return self._qualified_model_name(display_name or upstream_id, provider.name)
+
+    def generate_tag_entry(self, ollama_name, provider, upstream_id=None):
+        upstream_id = upstream_id or self._public_model_base(ollama_name)
         return {
             "name": ollama_name,
             "model": ollama_name,
             "modified_at": now_iso(),
             "size": 0,
-            "digest": "",
+            "digest": uuid.uuid4().hex[:12],
             "details": {
                 "parent_model": "",
                 "format": "",
-                "family": provider.family,
+                "family": "",
                 "families": None,
                 "parameter_size": "",
                 "quantization_level": "",
             },
         }
 
+    def _stable_digest(self, provider_name, model_id):
+        seed = "%s:%s" % (provider_name, str(model_id))
+        return uuid.uuid5(uuid.NAMESPACE_URL, seed).hex[:12]
+
+    def _defaults_for(self, item):
+        defaults = item.get("defaults") if isinstance(item.get("defaults"), dict) else {}
+        merged = dict(defaults)
+        value = defaults.get("capabilities")
+        merged["capabilities"] = [str(cap) for cap in value] if isinstance(value, list) else []
+        merged["details"] = dict(defaults.get("details") or {})
+        merged["model_info"] = dict(defaults.get("model_info") or {})
+        return merged
+
+    def _provider_defaults(self, provider):
+        defaults = self.models_defaults.get(str(provider.name))
+        if isinstance(defaults, dict):
+            return self._defaults_for({"defaults": defaults})
+        for item in self.list_models_files():
+            if item["provider"].lower() == str(provider.name).lower() and item.get("defaults"):
+                return self._defaults_for(item)
+        return {
+            "capabilities": [],
+            "details": {},
+            "model_info": {},
+        }
+
+    def _model_values(self, item):
+        """把新旧模板统一成供 tags/show 使用的扁平元数据。"""
+        defaults = self._defaults_for(item)
+        if isinstance(item.get("data"), dict) and item["data"]:
+            values = dict(item["data"])
+        else:
+            tag = item.get("tag") if isinstance(item.get("tag"), dict) else {}
+            show = item.get("show") if isinstance(item.get("show"), dict) else {}
+            values = {
+                "name": tag.get("name") or tag.get("model") or item.get("upstream"),
+                "digest": tag.get("digest"),
+                "size": tag.get("size"),
+                "modified_at": tag.get("modified_at") or show.get("modified_at"),
+                "capabilities": show.get("capabilities"),
+                "details": show.get("details") or {},
+                "model_info": show.get("model_info") or {},
+            }
+
+        capabilities = values.get("capabilities")
+        capabilities = [str(cap) for cap in capabilities] if isinstance(capabilities, list) else []
+        if not capabilities:
+            capabilities = defaults["capabilities"] or ["completion", "tools"]
+        values["capabilities"] = capabilities
+        if not isinstance(values.get("details"), dict):
+            values["details"] = {}
+        if not isinstance(values.get("model_info"), dict):
+            values["model_info"] = {}
+        return values, defaults
+
+    def _tags_response(self, item, public_name):
+        values, defaults = self._model_values(item)
+        digest = values.get("digest") or defaults.get("digest")
+        if not digest:
+            digest = self._stable_digest(item["provider"], item["upstream"])
+        try:
+            size = int(values.get("size", defaults.get("size", 0)) or 0)
+        except (TypeError, ValueError):
+            size = 0
+        return {
+            "name": public_name,
+            "model": public_name,
+            "modified_at": values.get("modified_at") or now_iso(),
+            "size": size,
+            "digest": str(digest),
+            # 列表只保留轻量详情；完整参数由 /api/show 返回。
+            "details": {
+                "parent_model": "",
+                "format": "",
+                "family": "",
+                "families": None,
+                "parameter_size": "",
+                "quantization_level": "",
+            },
+        }
+
+    def _public_model_base(self, name):
+        """去掉公开模型名上的 :latest / :provider 后缀，得到目录匹配名。"""
+        return self._model_base(name)
+
+    def _show_response(self, item, provider, ollama_name, upstream_id):
+        values, defaults = self._model_values(item)
+        raw_details = values["details"]
+        family = str(raw_details.get("family")
+                     or self._infer_model_family(item.get("name") or upstream_id)
+                     or provider.family or "")
+
+        detail_defaults = defaults.get("details")
+
+        def detail_text(key):
+            value = raw_details.get(key)
+            if value is None or str(value) == "":
+                value = detail_defaults.get(key)
+            return "" if value is None else str(value)
+
+        parameter_size = detail_text("parameter_size")
+        parameter_count = self._number(parameter_size)
+
+        info_values = values["model_info"]
+        context_key = "%s.context_length" % family
+        embedding_key = "%s.embedding_length" % family
+        context_length = (self._number(info_values.get(context_key))
+                          or self._number(defaults.get("context_length"))
+                          or self._number(defaults["model_info"].get(context_key))
+                          or 128000)
+        embedding_length = (self._number(info_values.get(embedding_key))
+                            or self._number(defaults.get("embedding_length"))
+                            or self._number(defaults["model_info"].get(embedding_key))
+                            or 2048)
+
+        return {
+            "capabilities": list(values["capabilities"]),
+            "details": {
+                "parent_model": detail_text("parent_model"),
+                "format": detail_text("format"),
+                "family": family,
+                "families": None,
+                "parameter_size": parameter_size,
+                "quantization_level": detail_text("quantization_level"),
+            },
+            "model_info": {
+                "general.architecture": family,
+                "general.parameter_count": parameter_count,
+                context_key: context_length,
+                embedding_key: embedding_length,
+            },
+            "modified_at": values.get("modified_at") or now_iso(),
+        }
+
     def show_for(self, name):
         provider, upstream = self.resolve_model(name)
         if provider is not None and upstream:
             entry, path = self.find_models_entry(provider, upstream, name)
-            if entry and isinstance(entry.get("show"), dict):
-                show = dict(entry["show"])
+            if entry is not None:
                 self.log("show model=%s provider=%s source=file(%s)" % (
                     name, provider.name, os.path.basename(path)))
-                return show
+                return self._show_response(entry, provider, name, upstream)
         if provider is None:
             provider = self.config.providers[0]
         self.log("show model=%s source=auto provider=%s" % (name, provider.name))
         return self.generate_show(name, provider)
 
-    def generate_show(self, ollama_name, provider):
+    def generate_show(self, ollama_name, provider, upstream_id=None):
+        model_hint = upstream_id or self._public_model_base(ollama_name)
+        defaults = self._provider_defaults(provider)
+        default_details = defaults.get("details", {})
+        family = (default_details.get("family")
+                  or self._infer_model_family(model_hint)
+                  or provider.family or "")
         return {
-            "capabilities": ["completion", "tools"],
+            "capabilities": list(defaults.get("capabilities") or ["completion", "tools"]),
             "details": {
                 "parent_model": "",
                 "format": "",
-                "family": provider.family,
+                "family": family,
                 "families": None,
-                "parameter_size": "",
-                "quantization_level": "",
+                "parameter_size": str(default_details.get("parameter_size") or ""),
+                "quantization_level": str(default_details.get("quantization_level") or ""),
             },
             "model_info": {
-                "general.architecture": provider.family,
-                "%s.context_length" % provider.family: self.config.default_num_ctx,
+                "general.architecture": family,
+                "general.parameter_count": None,
+                "%s.context_length" % family: self._number(
+                    defaults.get("context_length")) or 128000,
+                "%s.embedding_length" % family: self._number(
+                    defaults.get("embedding_length")) or 2048,
             },
             "modified_at": now_iso(),
         }
@@ -1402,8 +1652,8 @@ class Proxy:
     def v1_models(self):
         data, seen = [], set()
         for provider in self.config.providers:
-            for mid in self.fetch_provider_models(provider):
-                tag = self.public_model_name(provider, mid)
+            for mid in self._provider_model_ids(provider):
+                tag = self._public_model_name_for(provider, mid)
                 if tag.lower() in seen:
                     continue
                 seen.add(tag.lower())

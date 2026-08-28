@@ -20,3 +20,11 @@ dist/
 .test_tmp/
 startup.log
 startup.err
+.pytest-tmp/
+
+# 临时目录, 仅保留测试报告与脚本
+tmp/
+!tmp/nvidia_whitelist_test_report.json
+!tmp/nvidia_whitelist_test_report.html
+!tmp/_report_rows.json
+!tmp/build_report_html.py

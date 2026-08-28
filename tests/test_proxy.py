@@ -190,6 +190,16 @@ def test_config_invalid_log_level_defaults_to_info(tmp_path):
     assert cfg.log_level == "info"
 
 
+def test_config_enabled_controls_active_providers(tmp_path):
+    cfg = Config({"providers": [
+        {"name": "off", "base_url": "http://x/", "enabled": False},
+        {"name": "on", "base_url": "http://x/", "enabled": True},
+        {"name": "default-on", "base_url": "http://x/"},
+    ]}, str(tmp_path))
+    assert [provider.name for provider in cfg.providers] == ["on", "default-on"]
+    assert all(provider.enabled for provider in cfg.providers)
+
+
 def test_provider_strips_base_url_slash():
     prov = Provider("deepseek", "https://api.deepseek.com/v1/", "key",
                     ["deepseek-v4-flash"], "deepseek")
@@ -370,7 +380,7 @@ def test_tags_lists_models(tmp_path):
     result = proxy.tags()
     names = [m["name"] for m in result["models"]]
     assert "deepseek-v4-flash:deepseek" in names
-    assert all(m["details"]["family"] for m in result["models"])
+    assert all(m["details"]["family"] == "" for m in result["models"])
 
 
 def test_tags_qualifies_shared_upstream_ids(tmp_path):
@@ -395,6 +405,77 @@ def test_show_for_unknown_uses_first_provider(tmp_path):
     proxy = build_proxy(tmp_path)
     show = proxy.show_for("totally-unknown")
     assert show["capabilities"] == ["completion", "tools"]
+
+
+def test_provider_model_file_builds_tags_and_show(tmp_path):
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "static.json").write_text(json.dumps({
+        "provider": "static",
+        "defaults": {
+            "capabilities": ["completion", "tools", "thinking"],
+            "context_length": 128000,
+            "embedding_length": 2048,
+        },
+        "models": [{
+            "name": "sample-model",
+            "model": "publisher/sample-model",
+            "digest": "0123456789ab",
+            "size": 123,
+            "capabilities": ["completion", "vision"],
+            "details": {
+                "parent_model": "",
+                "format": "",
+                "family": "",
+                "families": None,
+                "parameter_size": "7000000000",
+                "quantization_level": "FP8"
+            },
+            "model_info": {},
+            "modified_at": "2026-08-27T00:00:00Z",
+            "api_type": "responses",
+        }],
+    }), encoding="utf-8")
+    proxy = build_proxy(tmp_path, providers=[
+        {"name": "static", "base_url": "http://x/", "models": []},
+    ])
+
+    tag_entry = proxy.tags()["models"][0]
+    assert tag_entry["name"] == "sample-model:static"
+    assert tag_entry["model"] == "sample-model:static"
+    assert tag_entry["digest"] == "0123456789ab"
+    assert tag_entry["size"] == 123
+    assert tag_entry["details"]["family"] == ""
+    assert proxy.get_api_type(proxy.config.providers[0],
+                              "publisher/sample-model") == "responses"
+
+    show = proxy.show_for("sample-model:static")
+    assert show["capabilities"] == ["completion", "vision"]
+    assert show["details"]["parameter_size"] == "7000000000"
+    assert show["model_info"]["general.parameter_count"] == 7000000000
+    assert show["model_info"]["static.context_length"] == 128000
+
+
+def test_show_falls_back_to_provider_defaults(tmp_path):
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "static.json").write_text(json.dumps({
+        "provider": "static",
+        "defaults": {
+            "capabilities": ["completion", "tools", "thinking"],
+            "context_length": 64000,
+            "embedding_length": 4096,
+        },
+        "models": [],
+    }), encoding="utf-8")
+    proxy = build_proxy(tmp_path, providers=[
+        {"name": "static", "base_url": "http://x/", "models": []},
+    ])
+
+    show = proxy.show_for("totally-unknown")
+    assert show["capabilities"] == ["completion", "tools", "thinking"]
+    assert show["model_info"]["static.context_length"] == 64000
+    assert show["model_info"]["static.embedding_length"] == 4096
 
 
 # --------------------------------------------------------------------------- chat (non-stream)
@@ -598,7 +679,8 @@ def test_generate_tag_entry_shape(tmp_path):
     proxy = build_proxy(tmp_path)
     entry = proxy.generate_tag_entry("glm-5.2:latest", proxy.config.providers[0])
     assert entry["name"] == "glm-5.2:latest"
-    assert entry["details"]["family"]
+    assert entry["digest"]
+    assert entry["details"]["family"] == ""
 
 
 # --------------------------------------------------------------------------- body reading
@@ -706,8 +788,11 @@ def test_handler_suppresses_client_connection_abort(tmp_path):
 # --------------------------------------------------------------------------- CLI
 def _cli(*args):
     py = os.path.join(os.path.dirname(sys.executable), "python")
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run([py, os.path.join(REPO_ROOT, "openai_ollama_proxy.py"),
-                           *args], capture_output=True, text=True)
+                           *args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env)
 
 
 def test_cli_version_flags():

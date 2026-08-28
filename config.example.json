@@ -18,6 +18,7 @@
       "base_url": "https://api.deepseek.com",
       "api_key": "sk-请填入你的DeepSeekKey",
       "family": "deepseek",
+      "enabled": false,
       "models": []
     },
     {
@@ -25,6 +26,7 @@
       "base_url": "https://open.bigmodel.cn/api/paas/v4",
       "api_key": "sk-请填入你的智谱BigModelKey",
       "family": "glm",
+      "enabled": false,
       "models": []
     },
     {
@@ -32,6 +34,7 @@
       "base_url": "https://api.moonshot.cn/v1",
       "api_key": "sk-请填入你的KimiKey",
       "family": "kimi",
+      "enabled": false,
       "models": []
     },
     {
@@ -39,6 +42,7 @@
       "base_url": "https://opencode.ai/zen/v1",
       "api_key": "sk-请填入你的OpenCodeZenKey",
       "family": "opencode",
+      "enabled": false,
       "models": [],
       "headers": {
         "User-Agent": "opencode/1.18.21",
@@ -46,6 +50,14 @@
         "Authorization": "Bearer 请填入你的OpenCodeZenKey",
         "Content-Type": "application/json"
       }
+    },
+    {
+      "name": "nvidia",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "api_key": "请填入你的NVIDIA API Key",
+      "family": "nvidia",
+      "enabled": false,
+      "models": []
     }
   ],
   "mapping": {}

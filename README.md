@@ -77,6 +77,7 @@ curl http://127.0.0.1:11434/v1/models
       "api_key": "sk-xxx",
       "family": "deepseek",                   // 自动生成应答时使用的 family(可选)
       "headers": {},                          // 额外上游请求头(可选)
+      "enabled": true,                        // 设为 false 时跳过该 provider(默认 true)
       "models": []                            // 留空 = 从上游 /v1/models 动态发现
     }
   ],
@@ -86,6 +87,8 @@ curl http://127.0.0.1:11434/v1/models
 
 - `providers[].models` 留空数组时,`/api/tags` 与 `/v1/models` 会调用上游 `/v1/models`
   动态拉取列表(带 `cache_ttl` 缓存);也可以手写模型 id 列表固定展示。
+- `providers[].enabled` 控制单个上游是否启用;省略或为 `true` 时启用,
+  为 `false` 时不拉取模型、不注册路由、也不会出现在 `/api/tags` 与 `/v1/models`。
 - `cache_ttl` 过期后,`/api/tags` 会立即返回旧缓存并在后台刷新,不阻塞请求;
   启动时自动并行预热所有 provider,`fetch_wait_timeout` 控制首次拉取的最长等待。
 - 上游对带 tools 的请求返回 5xx 时,代理会自动剥离 `tools` / `tool_choice` 重试一次,
@@ -138,30 +141,51 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 
 ## models/ 目录
 
-`models/*.json` 按 provider 保存 Ollama `/api/tags` + `/api/show` 应答模板。
-模板内容仍遵循 Ollama 官方响应字段；外层 `providers` 只用于关联和路由。
+`models/<provider>.json` 按 provider 保存模型元数据，代理用它构建
+Ollama `/api/tags` 和 `/api/show` 应答。旧版外层 `providers` 模板仍兼容，
+但新格式应使用下面的结构。
 
 ```json
 {
-  "version": 1,
-  "providers": {
-    "opencode-zen": {
+  "provider": "opencode-zen",
+  "defaults": {
+    "capabilities": ["completion", "tools"],
+    "context_length": 128000,
+    "embedding_length": 2048
+  },
+  "models": [
+    {
+      "name": "deepseek-v4-flash",
       "model": "deepseek-v4-flash",
-      "tag": { "...": "GET /api/tags 条目" },
-      "show": { "...": "POST /api/show 响应" }
+      "digest": "0123456789ab",
+      "size": 0,
+      "capabilities": ["completion", "thinking", "tools"],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "deepseek",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "deepseek",
+        "general.parameter_count": null,
+        "deepseek.context_length": 128000,
+        "deepseek.embedding_length": 2048
+      },
+      "modified_at": "2026-08-27T00:00:00Z",
+      "api_type": "chat_completions"
     },
-    "deepseek": {
-      "model": "deepseek-v4-flash",
-      "tag": { "...": "可与上面不同" },
-      "show": { "...": "可与上面不同" }
-    }
-  }
+    ...
+  ]
 }
 ```
 
-- `providers` 的键必须等于 `config.json.providers[].name`。
-- entry 的 `model` 是发送给该 provider 的上游模型 ID；省略时使用文件名。
-- 同一个模型文件可以包含多个 provider，每个 provider 的参数、上下文和能力可以不同。
+- 文件名必须等于 `config.json.providers[].name`；顶层 `provider` 也必须相同。
+- 每个模型的 `model` 是发送给该 provider 的上游 ID，`name` 用于生成公开模型名。
+- `defaults` 只在某个值匹配不到且推演不出时兜底；确定值始终优先。
+- 同一个模型可出现在不同 provider 文件中，每个 provider 可配置不同参数与能力。
 
 当多个 provider 暴露同一个上游模型 ID 时，代理会保留第一个 provider 的默认名
 每个 provider 的模型都会使用 `<上游模型>:<provider>` 形式,例如

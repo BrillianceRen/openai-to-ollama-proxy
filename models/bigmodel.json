@@ -1,0 +1,132 @@
+{
+  "provider": "bigmodel",
+  "defaults": {
+    "capabilities": [
+      "completion",
+      "tools"
+    ],
+    "details": {
+      "parent_model": "",
+      "format": "",
+      "family": "",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": ""
+    },
+    "context_length": 128000,
+    "embedding_length": 2048,
+    "size": 0,
+    "digest": ""
+  },
+  "models": [
+    {
+      "name": "glm-5.1",
+      "model": "glm-5.1",
+      "digest": "4fb2af55eb6f",
+      "size": 744000000000,
+      "capabilities": [
+        "thinking",
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "glm",
+        "families": null,
+        "parameter_size": "744000000000",
+        "quantization_level": "FP8"
+      },
+      "model_info": {
+        "general.architecture": "glm",
+        "general.parameter_count": 744000000000,
+        "glm.context_length": 202752,
+        "glm.embedding_length": 6144
+      },
+      "modified_at": "2026-04-07T08:00:00-07:00",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "glm-5.2",
+      "model": "glm-5.2",
+      "digest": "331e1433dc3b",
+      "size": 753000000000,
+      "capabilities": [
+        "thinking",
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "glm",
+        "families": null,
+        "parameter_size": "753000000000",
+        "quantization_level": "fp8"
+      },
+      "model_info": {
+        "general.architecture": "glm",
+        "general.parameter_count": 753000000000,
+        "glm.context_length": 1048576,
+        "glm.embedding_length": 4096
+      },
+      "modified_at": "2026-06-16T08:00:00-07:00",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "glm-5.3",
+      "model": "glm-5.3",
+      "digest": "9427606a4e89",
+      "size": 0,
+      "capabilities": [
+        "thinking",
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "glm",
+        "families": null,
+        "parameter_size": "750000000000",
+        "quantization_level": " "
+      },
+      "model_info": {
+        "general.architecture": "glm",
+        "general.parameter_count": 750000000000,
+        "glm.context_length": 1048576,
+        "glm.embedding_length": 8192
+      },
+      "modified_at": "2026-08-16T08:00:00-07:00",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "glm-5.3-flash",
+      "model": "glm-5.3-flash",
+      "digest": "2a246ce3886f",
+      "size": 0,
+      "capabilities": [
+        "thinking",
+        "completion",
+        "tools",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "glm",
+        "families": null,
+        "parameter_size": "320000000000",
+        "quantization_level": "Q4_K_M"
+      },
+      "model_info": {
+        "general.architecture": "glm",
+        "general.parameter_count": 320000000000,
+        "glm.context_length": 1048576,
+        "glm.embedding_length": 8192
+      },
+      "modified_at": "2026-08-16T08:00:00-07:00",
+      "api_type": "chat_completions"
+    }
+  ]
+}

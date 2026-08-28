@@ -1,0 +1,464 @@
+{
+  "provider": "opencode-zen",
+  "defaults": {
+    "capabilities": [
+      "completion",
+      "tools"
+    ],
+    "details": {
+      "parent_model": "",
+      "format": "",
+      "family": "",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": ""
+    },
+    "context_length": 128000,
+    "embedding_length": 2048,
+    "size": 0,
+    "digest": ""
+  },
+  "models": [
+    {
+      "name": "deepseek-v4-flash",
+      "model": "deepseek-v4-flash",
+      "digest": "7cbd9bb81e02",
+      "size": 304000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "deepseek",
+        "families": null,
+        "parameter_size": "304000000000",
+        "quantization_level": "fp8"
+      },
+      "model_info": {
+        "general.architecture": "deepseek",
+        "general.parameter_count": 304000000000,
+        "deepseek.context_length": 1048576,
+        "deepseek.embedding_length": 4096
+      },
+      "modified_at": "2026-07-31T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "gpt-5-nano",
+      "model": "gpt-5-nano",
+      "digest": "85f3d767ed6f",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gpt",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gpt",
+        "general.parameter_count": null,
+        "gpt.context_length": 131000,
+        "gpt.embedding_length": 4096
+      },
+      "modified_at": "2025-08-07T00:00:00Z",
+      "api_type": "responses"
+    },
+    {
+      "name": "gpt-5.4-nano",
+      "model": "gpt-5.4-nano",
+      "digest": "60982a0f1e64",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gpt",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gpt",
+        "general.parameter_count": null,
+        "gpt.context_length": 400000,
+        "gpt.embedding_length": 4096
+      },
+      "modified_at": "2026-03-17T00:00:00Z",
+      "api_type": "responses"
+    },
+    {
+      "name": "gpt-5.6-luna",
+      "model": "gpt-5.6-luna",
+      "digest": "95026da3d51b",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gpt",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gpt",
+        "general.parameter_count": null,
+        "gpt.context_length": 1048576,
+        "gpt.embedding_length": 4096
+      },
+      "modified_at": "2026-07-09T00:00:00Z",
+      "api_type": "responses"
+    },
+    {
+      "name": "hy3-free",
+      "model": "hy3-free",
+      "digest": "70a12fd1381d",
+      "size": 597572342272,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "hy",
+        "families": null,
+        "parameter_size": "298786155776",
+        "quantization_level": "BF16"
+      },
+      "model_info": {
+        "general.architecture": "hy",
+        "general.parameter_count": 298786155776,
+        "hy.context_length": 190000,
+        "hy.embedding_length": 4096
+      },
+      "modified_at": "2026-07-06T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "laguna-s-2.1-free",
+      "model": "laguna-s-2.1-free",
+      "digest": "cc7fa4bb360a",
+      "size": 235123955200,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "laguna",
+        "families": null,
+        "parameter_size": "117561977600",
+        "quantization_level": "BF16"
+      },
+      "model_info": {
+        "general.architecture": "laguna",
+        "general.parameter_count": 117561977600,
+        "laguna.context_length": 256000,
+        "laguna.embedding_length": 3072
+      },
+      "modified_at": "2026-07-21T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "mimo-v2.5-free",
+      "model": "mimo-v2.5-free",
+      "digest": "b6eacbe82c6f",
+      "size": 315031102208,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "mimo",
+        "families": null,
+        "parameter_size": "310775040000",
+        "quantization_level": "FP8"
+      },
+      "model_info": {
+        "general.architecture": "mimo",
+        "general.parameter_count": 310775040000,
+        "mimo.context_length": 200000,
+        "mimo.embedding_length": 4096
+      },
+      "modified_at": "2026-04-24T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "minimax-m2.5",
+      "model": "minimax-m2.5",
+      "digest": "5cbf817343ad",
+      "size": 230121630720,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "minimax",
+        "families": null,
+        "parameter_size": "228703644928",
+        "quantization_level": "FP8"
+      },
+      "model_info": {
+        "general.architecture": "minimax",
+        "general.parameter_count": 228703644928,
+        "minimax.context_length": 204800,
+        "minimax.embedding_length": 3072
+      },
+      "modified_at": "2026-02-12T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "minimax-m2.7",
+      "model": "minimax-m2.7",
+      "digest": "96f752000569",
+      "size": 230066110464,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "minimax",
+        "families": null,
+        "parameter_size": "228689764864",
+        "quantization_level": "FP8"
+      },
+      "model_info": {
+        "general.architecture": "minimax",
+        "general.parameter_count": 228689764864,
+        "minimax.context_length": 204800,
+        "minimax.embedding_length": 3072
+      },
+      "modified_at": "2026-03-18T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "minimax-m3",
+      "model": "minimax-m3",
+      "digest": "a481103f072a",
+      "size": 854172958720,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "minimax",
+        "families": null,
+        "parameter_size": "427040140160",
+        "quantization_level": "BF16"
+      },
+      "model_info": {
+        "general.architecture": "minimax",
+        "general.parameter_count": 427040140160,
+        "minimax.context_length": 512000,
+        "minimax.embedding_length": 6144
+      },
+      "modified_at": "2026-06-01T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "muse-spark-1.2",
+      "model": "muse-spark-1.2",
+      "digest": "e2ee4a9dea45",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "muse",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "muse",
+        "general.parameter_count": null,
+        "muse.context_length": 1048576,
+        "muse.embedding_length": 4096
+      },
+      "modified_at": "2026-08-05T00:00:00Z",
+      "api_type": "responses"
+    },
+    {
+      "name": "muse-spark-1.2-contributor-free",
+      "model": "muse-spark-1.2-contributor-free",
+      "digest": "33eaeeca5b26",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "muse",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "muse",
+        "general.parameter_count": null,
+        "muse.context_length": 1048576,
+        "muse.embedding_length": 4096
+      },
+      "modified_at": "2026-08-05T00:00:00Z",
+      "api_type": "responses"
+    },
+    {
+      "name": "nemotron-3-ultra-free",
+      "model": "nemotron-3-ultra-free",
+      "digest": "cd9517deaa14",
+      "size": 1121049257984,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "nemotron",
+        "families": null,
+        "parameter_size": "560524603904",
+        "quantization_level": "BF16 checkpoint / NVFP4-trained"
+      },
+      "model_info": {
+        "general.architecture": "nemotron",
+        "general.parameter_count": 560524603904,
+        "nemotron.context_length": 1000000,
+        "nemotron.embedding_length": 8192
+      },
+      "modified_at": "2026-06-04T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "nemotron-3.5-lightning-free",
+      "model": "nemotron-3.5-lightning-free",
+      "digest": "3576887d493c",
+      "size": 65826538624,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "nemotron",
+        "families": null,
+        "parameter_size": "31577937344",
+        "quantization_level": "BF16 checkpoint / NVFP4-trained"
+      },
+      "model_info": {
+        "general.architecture": "nemotron",
+        "general.parameter_count": 31577937344,
+        "nemotron.context_length": 262144,
+        "nemotron.embedding_length": 2688
+      },
+      "modified_at": "2026-08-11T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "qwen3.5-plus",
+      "model": "qwen3.5-plus",
+      "digest": "4c3ab17af79c",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "qwen",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "qwen",
+        "general.parameter_count": null,
+        "qwen.context_length": 262144,
+        "qwen.embedding_length": 2048
+      },
+      "modified_at": "2026-02-16T00:00:00Z",
+      "api_type": "chat_completions"
+    },
+    {
+      "name": "x-preview-f-free",
+      "model": "x-preview-f-free",
+      "digest": "caa4d0ecb599",
+      "size": 0,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "ox",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "ox",
+        "general.parameter_count": null,
+        "ox.context_length": 1000000,
+        "ox.embedding_length": 4096
+      },
+      "modified_at": "2026-08-21T00:00:00Z",
+      "api_type": "chat_completions"
+    }
+  ]
+}
