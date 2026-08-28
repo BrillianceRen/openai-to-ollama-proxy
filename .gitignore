@@ -22,10 +22,5 @@ startup.log
 startup.err
 .pytest-tmp/
 
-# 临时目录, 仅保留测试报告与脚本
+# 临时目录(测试报告/脚本等), 不入库
 tmp/
-!tmp/
-!tmp/nvidia_whitelist_test_report.json
-!tmp/nvidia_whitelist_test_report.html
-!tmp/_report_rows.json
-!tmp/build_report_html.py
