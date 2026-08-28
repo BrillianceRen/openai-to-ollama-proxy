@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>NVIDIA 免费模型测试报表</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1a1f2e;--mut:#6b7280;--line:#e5e7eb;
+  --green:#0a7d43;--greenbg:#e3f5ec;--red:#b4232a;--redbg:#fbe7e8;--accent:#0058cc}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;
+  background:var(--bg);color:var(--ink)}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 48px}
+h1{font-size:22px;margin:0 0 4px}
+.sub2{color:var(--mut);font-size:13px;margin-bottom:22px}
+.stats{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;
+  padding:12px 20px;min-width:120px}
+.stat b{display:block;font-size:22px}
+.stat span{font-size:12px;color:var(--mut)}
+.tablebox{background:var(--card);border:1px solid var(--line);
+  border-radius:8px;overflow:auto}
+table{border-collapse:collapse;width:100%;min-width:900px}
+th{background:#f0f2f5;padding:10px 12px;text-align:left;font-size:13px;
+  color:#374151;cursor:pointer;user-select:none;white-space:nowrap;
+  border-bottom:2px solid var(--line)}
+th:hover{background:#e6e9ee}
+th .arr{font-size:10px;margin-left:4px;opacity:.35}
+th.sorted{color:var(--accent)}
+th.sorted .arr{opacity:1;color:var(--accent)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13.5px;
+  vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafbfd}
+.c{text-align:center}.n{text-align:right;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 10px;border-radius:10px;font-size:11.5px;
+  font-weight:600}
+.pass{background:var(--greenbg);color:var(--green)}
+.fail{background:var(--redbg);color:var(--red)}
+.cap{display:inline-block;padding:1px 8px;border-radius:8px;font-size:11px;
+  margin:1px 3px 1px 0;background:#eef1f5;color:#4b5563}
+.cap.vision{background:#e6f4fb;color:#0b6a99}
+.cap.thinking{background:#fdf3dc;color:#8a6400}
+.cap.tools{background:#ece8fb;color:#55419e}
+.sub{color:var(--mut);font-size:11.5px;margin-top:2px}
+.reply{max-width:230px;color:var(--mut);font-size:12px;word-break:break-all}
+input#q{width:100%;padding:9px 12px;border:1px solid var(--line);
+  border-radius:8px;font-size:14px;margin-bottom:14px;background:var(--card)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>NVIDIA 免费模型可用性报表</h1>
+<div class="sub2">白名单 18 个（纯文本 + 图文），
+推理实测 "Say OK" &middot; 点击表头排序 &middot; 支持搜索过滤</div>
+<div class="stats">
+<div class="stat"><b>18</b><span>模型总数</span></div>
+<div class="stat"><b style="color:var(--green)">16</b><span>可用 PASS</span></div>
+<div class="stat"><b style="color:var(--red)">2</b><span>失败 FAIL</span></div>
+<div class="stat"><b>8.4s</b><span>PASS 平均延迟</span></div>
+</div>
+<input id="q" placeholder="搜索模型 / ID / 能力…">
+<div class="tablebox">
+<table id="t">
+<thead><tr>
+<th data-k="name">模型 <span class="arr">▲▼</span></th>
+<th data-k="status" class="c">状态 <span class="arr">▲▼</span></th>
+<th data-k="latency" data-n="1">延迟(s) <span class="arr">▲▼</span></th>
+<th data-k="caps">能力 <span class="arr">▲▼</span></th>
+<th data-k="family">Family <span class="arr">▲▼</span></th>
+<th data-k="params" data-n="1">参数量 <span class="arr">▲▼</span></th>
+<th data-k="ctx" data-n="1">上下文 <span class="arr">▲▼</span></th>
+<th data-k="quant">精度 <span class="arr">▲▼</span></th>
+<th>实测回复</th>
+</tr></thead>
+<tbody><tr><td><b>deepseek-v4-flash-0731</b><div class="sub">deepseek-ai/deepseek-v4-flash-0731</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="33.3">33.3</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>deepseek</td><td class="n" data-v="304000000000">304B</td><td class="n" data-v="1048576">1,048,576</td><td>-</td><td class="reply">slow first call</td></tr><tr><td><b>deepseek-v4-pro-0813</b><div class="sub">deepseek-ai/deepseek-v4-pro-0813</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="9.68">9.68</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>deepseek</td><td class="n" data-v="1650000000000">1650B</td><td class="n" data-v="1048576">1,048,576</td><td>fp8</td><td class="reply">OK.</td></tr><tr><td><b>diffusiongemma-26b-a4b-it</b><div class="sub">google/diffusiongemma-26b-a4b-it</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="5.03">5.03</td><td><span class="cap completion">completion</span><span class="cap tools">tools</span></td><td>gemma</td><td class="n" data-v="0">-</td><td class="n" data-v="128000">128,000</td><td>-</td><td class="reply">&mdash;</td></tr><tr><td><b>gemma-4-31b-it</b><div class="sub">google/gemma-4-31b-it</div></td><td class="c" data-v="1"><span class="badge fail">FAIL</span></td><td class="n" data-v="63.0">63</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>gemma</td><td class="n" data-v="30700000000">30.7B</td><td class="n" data-v="262144">262,144</td><td>-</td><td class="reply">upstream closed connection</td></tr><tr><td><b>llama-3.2-11b-vision-instruct</b><div class="sub">meta/llama-3.2-11b-vision-instruct</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="6.04">6.04</td><td><span class="cap completion">completion</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>llama</td><td class="n" data-v="10670220835">10.6702B</td><td class="n" data-v="131072">131,072</td><td>bf16</td><td class="reply">OK</td></tr><tr><td><b>llama-3.2-90b-vision-instruct</b><div class="sub">meta/llama-3.2-90b-vision-instruct</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="9.3">9.3</td><td><span class="cap completion">completion</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>llama</td><td class="n" data-v="88593355323">88.5934B</td><td class="n" data-v="131072">131,072</td><td>bf16</td><td class="reply">ok on retry</td></tr><tr><td><b>muse-glimmer-30b</b><div class="sub">meta/muse-glimmer-30b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.9">3.9</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>muse</td><td class="n" data-v="29600000000">29.6B</td><td class="n" data-v="131072">131,072</td><td>bf16</td><td class="reply">&lt;no choices&gt;</td></tr><tr><td><b>minimax-m3</b><div class="sub">minimaxai/minimax-m3</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.49">3.49</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>minimax</td><td class="n" data-v="428000000000">428B</td><td class="n" data-v="1048576">1,048,576</td><td>fp8</td><td class="reply">OK</td></tr><tr><td><b>mistral-nemotron</b><div class="sub">mistralai/mistral-nemotron</div></td><td class="c" data-v="1"><span class="badge fail">FAIL</span></td><td class="n" data-v="63.0">63</td><td><span class="cap completion">completion</span><span class="cap tools">tools</span></td><td>mistral</td><td class="n" data-v="0">-</td><td class="n" data-v="131072">131,072</td><td>-</td><td class="reply">upstream closed connection</td></tr><tr><td><b>ising-calibration-1.5-31b</b><div class="sub">nvidia/ising-calibration-1.5-31b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.55">3.55</td><td><span class="cap completion">completion</span><span class="cap vision">vision</span></td><td>gemma4</td><td class="n" data-v="31273088876">31.2731B</td><td class="n" data-v="262144">262,144</td><td>bf16</td><td class="reply">I&#x27;m NVIDIA Ising-Calibration-</td></tr><tr><td><b>nemotron-3-nano-30b-a3b</b><div class="sub">nvidia/nemotron-3-nano-30b-a3b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.47">3.47</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>nemotron</td><td class="n" data-v="33015632214">33.0156B</td><td class="n" data-v="262144">262,144</td><td>-</td><td class="reply">The user says &quot;Say OK&quot;. The</td></tr><tr><td><b>nemotron-3-super-120b-a12b</b><div class="sub">nvidia/nemotron-3-super-120b-a12b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.76">3.76</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>nemotron</td><td class="n" data-v="120000000000">120B</td><td class="n" data-v="1048576">1,048,576</td><td>-</td><td class="reply">Okay, the user just said &quot;Say</td></tr><tr><td><b>nemotron-3-ultra-550b-a55b</b><div class="sub">nvidia/nemotron-3-ultra-550b-a55b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="4.4">4.4</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>nemotron</td><td class="n" data-v="550000000000">550B</td><td class="n" data-v="1048576">1,048,576</td><td>-</td><td class="reply">The user wants me to say &quot;OK</td></tr><tr><td><b>nemotron-3.5-lightning-30b-a3b</b><div class="sub">nvidia/nemotron-3.5-lightning-30b-a3b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.65">3.65</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>nemotron</td><td class="n" data-v="30000000000">30B</td><td class="n" data-v="1048576">1,048,576</td><td>-</td><td class="reply">Here&#x27;s a thinking process:
+
+1.</td></tr><tr><td><b>gpt-oss-120b</b><div class="sub">openai/gpt-oss-120b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="4.93">4.93</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>gpt-oss</td><td class="n" data-v="117000000000">117B</td><td class="n" data-v="131072">131,072</td><td>-</td><td class="reply">&lt;no choices&gt;</td></tr><tr><td><b>gpt-oss-20b</b><div class="sub">openai/gpt-oss-20b</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.66">3.66</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>gpt-oss</td><td class="n" data-v="20914757184">20.9148B</td><td class="n" data-v="131072">131,072</td><td>-</td><td class="reply">&lt;no choices&gt;</td></tr><tr><td><b>laguna-xs-2.1</b><div class="sub">poolside/laguna-xs-2.1</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="3.46">3.46</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span></td><td>laguna</td><td class="n" data-v="33000000000">33B</td><td class="n" data-v="262144">262,144</td><td>-</td><td class="reply">OK</td></tr><tr><td><b>step-3.7-flash</b><div class="sub">stepfun-ai/step-3.7-flash</div></td><td class="c" data-v="0"><span class="badge pass">PASS</span></td><td class="n" data-v="33.46">33.46</td><td><span class="cap completion">completion</span><span class="cap thinking">thinking</span><span class="cap tools">tools</span><span class="cap vision">vision</span></td><td>step</td><td class="n" data-v="198000000000">198B</td><td class="n" data-v="262144">262,144</td><td>fp8</td><td class="reply">&lt;no choices&gt;</td></tr></tbody>
+</table>
+</div>
+</div>
+<script>
+const ths=[...document.querySelectorAll('th[data-k]')];
+const state={};
+ths.forEach(th=>{
+  state[th.dataset.k]=null;
+  th.addEventListener('click',()=>{
+    const k=th.dataset.k, num=th.hasAttribute('data-n');
+    const idx=[...th.parentNode.children].indexOf(th);
+    Object.keys(state).forEach(x=>state[x]=null);
+    // null -> asc -> desc -> asc ...
+    state[k]=(state[k]===true)?false:true;
+    ths.forEach(t=>{t.classList.remove('sorted');
+      t.querySelector('.arr').textContent='▲▼';});
+    th.classList.add('sorted');
+    th.querySelector('.arr').textContent=state[k]?'▲':'▼';
+    const tb=document.querySelector('#t tbody');
+    [...tb.rows].sort((A,B)=>{
+      const a=A.cells[idx], b=B.cells[idx];
+      let va=a.dataset.v!==undefined?a.dataset.v:a.textContent.trim();
+      let vb=b.dataset.v!==undefined?b.dataset.v:b.textContent.trim();
+      let c;
+      if(k==='status'){c=(+va||0)-(+vb||0);}
+      else if(num){va=parseFloat(va)||0;vb=parseFloat(vb)||0;
+        c=va<vb?-1:(va>vb?1:0);}
+      else{c=va.localeCompare(vb,'zh');}
+      return state[k]?c:-c;
+    }).forEach(r=>tb.appendChild(r));
+  });
+});
+document.getElementById('q').addEventListener('input',e=>{
+  const q=e.target.value.toLowerCase();
+  document.querySelectorAll('#t tbody tr').forEach(r=>{
+    r.style.display=r.textContent.toLowerCase().includes(q)?'':'none';
+  });
+});
+// 初始视图：状态升序(PASS 在前), 再点延迟列看最快模型
+</script>
+</body></html>

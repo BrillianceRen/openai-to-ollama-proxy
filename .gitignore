@@ -24,6 +24,7 @@ startup.err
 
 # 临时目录, 仅保留测试报告与脚本
 tmp/
+!tmp/
 !tmp/nvidia_whitelist_test_report.json
 !tmp/nvidia_whitelist_test_report.html
 !tmp/_report_rows.json
