@@ -233,6 +233,15 @@ class VertexClient:
     def fetch_models(self):
         if self.config.custom_models:
             return list(self.config.custom_models)
+        templates = self.load_models_templates()
+        if templates:
+            ids = []
+            for t in templates:
+                name = t.get("model") or t.get("name")
+                if name and name not in ids:
+                    ids.append(name)
+            if ids:
+                return ids
         return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"]
 
     def warm_models(self):
