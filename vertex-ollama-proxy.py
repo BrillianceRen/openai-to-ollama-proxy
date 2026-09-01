@@ -922,6 +922,7 @@ class VertexClient:
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     server_version = "vertex-ollama-proxy/" + __version__
 
     @property
@@ -1002,6 +1003,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
