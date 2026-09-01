@@ -6,6 +6,7 @@ vertex-ollama-proxy
 
 把 Google Cloud Vertex AI Agent Platform (generateContent / streamGenerateContent)
 转换为 Ollama API, 同时提供 OpenAI 兼容接口 /v1/chat/completions 与 /v1/models。
+支持 API Key (x-goog-api-key) 与 OAuth2 Bearer Token (Authorization: Bearer) 双鉴权模式。
 仅依赖 Python 标准库，零第三方依赖。敏感信息（如 API Key, Project ID）从 config.json 或环境变量中读取。
 
 端点
@@ -25,6 +26,7 @@ POST /v1/chat/completions   OpenAI 兼容请求透传 (支持流式 SSE)
     python vertex-ollama-proxy.py
     python vertex-ollama-proxy.py --config config.json
     python vertex-ollama-proxy.py --api-key <API_KEY> --vertex-project <PROJECT_ID>
+    python vertex-ollama-proxy.py --bearer-token <OAUTH_TOKEN> --vertex-project <PROJECT_ID>
     python vertex-ollama-proxy.py --port 11434 --verbose
 """
 
@@ -58,7 +60,7 @@ DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "config.json")
 DEFAULT_VERTEX_LOCATION = "us-central1"
 DEFAULT_MODEL = "gemini-2.5-flash"
 OLLAMA_VERSION = "0.5.4"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 def now_iso():
@@ -129,7 +131,7 @@ class Config:
         # 优先读取 vertex 专属节，若无则从顶层或 providers 提取
         vertex_cfg = data.get("vertex", {}) if isinstance(data.get("vertex"), dict) else {}
 
-        # 从环境变量、配置文件中提取敏感配置（禁止硬编码）
+        # 1. API Key 鉴权
         env_key = os.environ.get("VERTEX_API_KEY")
         cfg_key = vertex_cfg.get("api_key") or data.get("api_key")
         if not cfg_key and isinstance(data.get("providers"), list):
@@ -137,8 +139,17 @@ class Config:
                 if p.get("name") == "vertex" and p.get("api_key"):
                     cfg_key = p["api_key"]
                     break
-
         self.api_key = str(env_key or cfg_key or "").strip()
+
+        # 2. OAuth2 Bearer Token 鉴权
+        env_token = os.environ.get("VERTEX_BEARER_TOKEN") or os.environ.get("GOOGLE_OAUTH_TOKEN")
+        cfg_token = vertex_cfg.get("bearer_token") or data.get("bearer_token")
+        self.bearer_token = str(env_token or cfg_token or "").strip()
+
+        # 3. ADC / 凭据文件
+        env_cred = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        cfg_cred = vertex_cfg.get("credentials_file") or data.get("credentials_file")
+        self.credentials_file = str(env_cred or cfg_cred or "").strip()
 
         env_proj = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
         cfg_proj = vertex_cfg.get("vertex_project") or vertex_cfg.get("project") or data.get("vertex_project") or data.get("project")
@@ -164,18 +175,20 @@ class Config:
 
 
 class VertexClient:
-    """Google Cloud Vertex AI Agent Platform 客户端。"""
+    """Google Cloud Vertex AI Agent Platform 客户端 (支持 API Key 与 OAuth2 Token)。"""
 
     def __init__(self, config):
         self.config = config
         self.log_level = config.log_level
         self.lock = threading.RLock()
         self._opener_cache = None
-        self.model_cache = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"]
+        self.model_cache = []
         self.model_details_cache = {}
         self.fetched_at = 0
         self.models_entries = None
         self.models_defaults = {}
+        self._adc_cached_token = None
+        self._adc_token_expiry = 0
 
     def log(self, msg, level="info"):
         levels = {"quiet": 0, "info": 1, "debug": 2}
@@ -193,14 +206,73 @@ class VertexClient:
                 self._opener_cache = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         return self._opener_cache
 
+    def _get_auth_headers(self):
+        """生成鉴权请求头：优先 OAuth2 Bearer Token / ADC 刷新，其次 API Key。"""
+        # 1. 直接提供 Bearer Token
+        if self.config.bearer_token:
+            return {"Authorization": f"Bearer {self.config.bearer_token}"}
+
+        # 2. 如果配置了凭据文件 (ADC JSON 或 service_account.json)，自动刷新 OAuth2 Token
+        if self.config.credentials_file or not self.config.api_key:
+            cred_path = self.config.credentials_file
+            if not cred_path:
+                appdata = os.environ.get("APPDATA", "")
+                home = os.path.expanduser("~")
+                candidate_adcs = [
+                    os.path.join(appdata, "gcloud", "application_default_credentials.json"),
+                    os.path.join(home, ".config", "gcloud", "application_default_credentials.json"),
+                ]
+                for p in candidate_adcs:
+                    if os.path.exists(p):
+                        cred_path = p
+                        break
+
+            if cred_path and os.path.exists(cred_path):
+                now = time.time()
+                if self._adc_cached_token and now < self._adc_token_expiry - 60:
+                    return {"Authorization": f"Bearer {self._adc_cached_token}"}
+
+                try:
+                    with open(cred_path, "r", encoding="utf-8") as f:
+                        cdata = json.load(f)
+                    if cdata.get("type") == "authorized_user" and cdata.get("refresh_token"):
+                        token_payload = {
+                            "client_id": cdata.get("client_id"),
+                            "client_secret": cdata.get("client_secret"),
+                            "refresh_token": cdata.get("refresh_token"),
+                            "grant_type": "refresh_token",
+                        }
+                        t_req = urllib.request.Request(
+                            "https://oauth2.googleapis.com/token",
+                            data=json.dumps(token_payload).encode("utf-8"),
+                            headers={"Content-Type": "application/json"}
+                        )
+                        with self._opener().open(t_req, timeout=15) as t_resp:
+                            t_data = json.loads(t_resp.read().decode("utf-8"))
+                            self._adc_cached_token = t_data["access_token"]
+                            self._adc_token_expiry = now + int(t_data.get("expires_in", 3600))
+                            self.log("成功通过 ADC 刷新 OAuth2 Access Token (有效时间 %ds)" % t_data.get("expires_in", 3600), level="debug")
+                            return {"Authorization": f"Bearer {self._adc_cached_token}"}
+                except Exception as exc:
+                    self.log("ADC Token 刷新失败: %s" % exc, level="debug")
+
+        # 3. 使用 API Key
+        if self.config.api_key:
+            return {"x-goog-api-key": self.config.api_key}
+
+        raise ValueError(
+            "未配置有效的 Vertex AI 凭据！请在 config.json 或环境变量中提供以下任意一项：\n"
+            "  1. API Key: vertex.api_key 或环境变量 VERTEX_API_KEY\n"
+            "  2. OAuth2 Bearer Token: vertex.bearer_token 或环境变量 VERTEX_BEARER_TOKEN\n"
+            "  3. 运行 'gcloud auth application-default login' 生成应用默认凭据 (ADC)"
+        )
+
     def base_url(self):
         proj = self.config.vertex_project or "default"
         loc = self.config.vertex_location or DEFAULT_VERTEX_LOCATION
         return f"https://{loc}-aiplatform.googleapis.com/v1beta1/projects/{proj}/locations/{loc}"
 
     def request(self, endpoint, payload=None, method=None, stream=False):
-        if not self.config.api_key:
-            raise ValueError("未配置 Vertex API Key。请在 config.json 中配置 vertex.api_key 或通过环境变量 VERTEX_API_KEY / 启动参数 --api-key 指定。")
         if not self.config.vertex_project:
             raise ValueError("未配置 Vertex Project ID / Number。请在 config.json 中配置 vertex.vertex_project 或通过环境变量 VERTEX_PROJECT / 启动参数 --vertex-project 指定。")
 
@@ -208,8 +280,9 @@ class VertexClient:
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream" if stream else "application/json",
-            "x-goog-api-key": self.config.api_key,
         }
+        headers.update(self._get_auth_headers())
+
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
         req_method = method or ("POST" if payload is not None else "GET")
         req = urllib.request.Request(url, data=data, headers=headers, method=req_method)
@@ -233,6 +306,27 @@ class VertexClient:
     def fetch_models(self):
         if self.config.custom_models:
             return list(self.config.custom_models)
+
+        # 1. 尝试通过 OAuth2 动态获取 Model Garden 模型列表
+        try:
+            auth_headers = self._get_auth_headers()
+            if "Authorization" in auth_headers:
+                url = f"{self.base_url()}/publishers/google/models"
+                req = urllib.request.Request(url, headers=auth_headers)
+                with self._opener().open(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    models = []
+                    for m in data.get("publisherModels", []):
+                        name = m.get("name", "").split("/")[-1]
+                        if name:
+                            models.append(name)
+                    if models:
+                        self.log("通过 OAuth2 成功动态发现 %d 个 Vertex 模型" % len(models))
+                        return models
+        except Exception as exc:
+            self.log("Vertex 动态拉取模型列表跳过: %s" % exc, level="debug")
+
+        # 2. 从本地元数据模板中读取
         templates = self.load_models_templates()
         if templates:
             ids = []
@@ -242,10 +336,11 @@ class VertexClient:
                     ids.append(name)
             if ids:
                 return ids
+
         return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"]
 
     def warm_models(self):
-        if not self.config.api_key or not self.config.vertex_project:
+        if not self.config.vertex_project:
             return
 
         def _probe():
@@ -298,10 +393,11 @@ class VertexClient:
                                 with open(path, "r", encoding="utf-8") as fh:
                                     data = json.load(fh)
                                     if isinstance(data, dict):
-                                        defaults = data.get("defaults") or defaults
-                                        for m in data.get("models", []):
-                                            if isinstance(m, dict):
-                                                entries.append(m)
+                                        if data.get("provider") == "vertex" or "vertex" in filename.lower():
+                                            defaults = data.get("defaults") or defaults
+                                            for m in data.get("models", []):
+                                                if isinstance(m, dict):
+                                                    entries.append(m)
                             except Exception:
                                 pass
             self.models_defaults = defaults
@@ -1067,6 +1163,7 @@ class ProxyServer(ThreadingHTTPServer):
 def main():
     parser = argparse.ArgumentParser(description="Google Cloud Vertex AI Agent Platform -> Ollama API 代理")
     parser.add_argument("--api-key", default=None, help="Vertex AI API Key (也可通过 config.json 或环境变量 VERTEX_API_KEY 配置)")
+    parser.add_argument("--bearer-token", default=None, help="GCP OAuth2 Bearer Token (也可通过 config.json 或环境变量 VERTEX_BEARER_TOKEN 配置)")
     parser.add_argument("--vertex-project", default=None, help="Vertex AI Project Number/ID (也可通过 config.json 或环境变量 VERTEX_PROJECT 配置)")
     parser.add_argument("--vertex-location", default=None, help="Vertex AI Location/Region (默认 us-central1)")
     parser.add_argument("--default-model", default=None, help="默认模型 (默认 gemini-2.5-flash)")
@@ -1091,6 +1188,8 @@ def main():
     config = Config(cfg_data, cfg_base_dir)
     if args.api_key:
         config.api_key = args.api_key
+    if args.bearer_token:
+        config.bearer_token = args.bearer_token
     if args.vertex_project:
         config.vertex_project = args.vertex_project
     if args.vertex_location:
@@ -1114,8 +1213,10 @@ def main():
     print("  - Vertex AI: %s (Project: %s, Region: %s)" % (
         client.base_url(), proj_display, config.vertex_location))
     print("  - 默认模型: %s" % config.default_model)
-    key_display = (config.api_key[:6] + "..." + config.api_key[-4:]) if len(config.api_key) > 10 else (config.api_key or "(未设置，请在 config.json 中配置)")
-    print("  - API Key: %s" % key_display)
+    auth_info = "OAuth2 Bearer Token" if config.bearer_token else (
+        ("API Key: " + config.api_key[:6] + "..." + config.api_key[-4:]) if len(config.api_key) > 10 else (config.api_key or "ADC 自动发现")
+    )
+    print("  - 鉴权模式: %s" % auth_info)
     print("日志级别: %s (--verbose 可开启 debug)" % config.log_level)
     print("按 Ctrl+C 停止")
 

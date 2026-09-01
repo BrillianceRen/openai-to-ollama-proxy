@@ -104,3 +104,17 @@ def test_vertex_base_url():
     })
     client = VertexClient(cfg)
     assert client.base_url() == "https://europe-west1-aiplatform.googleapis.com/v1beta1/projects/123456789/locations/europe-west1"
+
+
+def test_vertex_auth_headers_api_key():
+    cfg = Config({"api_key": "my-test-api-key"})
+    client = VertexClient(cfg)
+    headers = client._get_auth_headers()
+    assert headers == {"x-goog-api-key": "my-test-api-key"}
+
+
+def test_vertex_auth_headers_bearer_token():
+    cfg = Config({"bearer_token": "ya29.test-bearer-token"})
+    client = VertexClient(cfg)
+    headers = client._get_auth_headers()
+    assert headers == {"Authorization": "Bearer ya29.test-bearer-token"}
