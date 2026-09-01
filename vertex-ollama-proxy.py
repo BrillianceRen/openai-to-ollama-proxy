@@ -139,7 +139,7 @@ class Config:
                 if p.get("name") == "vertex" and p.get("api_key"):
                     cfg_key = p["api_key"]
                     break
-        self.api_key = str(env_key or cfg_key or "").strip()
+        raw_key = str(env_key or cfg_key or "").strip()
 
         # 2. OAuth2 Bearer Token 鉴权
         env_token = os.environ.get("VERTEX_BEARER_TOKEN") or os.environ.get("GOOGLE_OAUTH_TOKEN")
@@ -149,7 +149,15 @@ class Config:
         # 3. ADC / 凭据文件
         env_cred = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         cfg_cred = vertex_cfg.get("credentials_file") or data.get("credentials_file")
+        if not cfg_cred and raw_key and (raw_key.lower().endswith(".json") or os.path.exists(os.path.join(base_dir, raw_key))):
+            cfg_cred = raw_key
+            self.api_key = ""
+        else:
+            self.api_key = raw_key
+
         self.credentials_file = str(env_cred or cfg_cred or "").strip()
+        if self.credentials_file and not os.path.isabs(self.credentials_file):
+            self.credentials_file = os.path.abspath(os.path.join(base_dir, self.credentials_file))
 
         env_proj = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
         cfg_proj = vertex_cfg.get("vertex_project") or vertex_cfg.get("project") or data.get("vertex_project") or data.get("project")
