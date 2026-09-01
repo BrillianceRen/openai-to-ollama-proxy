@@ -344,10 +344,13 @@ class VertexClient:
                             models = []
                             for m in data.get("publisherModels", []):
                                 name = m.get("name", "").split("/")[-1]
+                                # 过滤掉 TTS、纯音频、纯图像检测、转写等非对话推理模型
+                                if any(x in name.lower() for x in ("-tts", "native-audio", "-image", "embedding", "transcribe", "efficientnet", "yolo", "deeplab", "sentiment", "syntax", "resnet", "vit-", "pt-test")):
+                                    continue
                                 if name and name not in models:
                                     models.append(name)
                             if models:
-                                self.log("通过 OAuth2 动态发现 %d 个 Vertex 模型: %s" % (
+                                self.log("通过 OAuth2 动态发现 %d 个 Vertex 文本/对话模型: %s" % (
                                     len(models), ", ".join(models[:6]) + ("..." if len(models) > 6 else "")))
                                 with self.lock:
                                     self.model_cache = models
@@ -407,6 +410,12 @@ class VertexClient:
             "pro": "gemini-2.5-pro",
             "gemini-flash": "gemini-2.5-flash",
             "gemini-pro": "gemini-2.5-pro",
+            "gemini-3.7-flash": "gemini-2.5-flash",
+            "gemini-3.6-flash": "gemini-2.5-flash",
+            "gemini-3.5-flash": "gemini-2.5-flash",
+            "gemini-3.5-flash-lite": "gemini-2.5-flash-lite",
+            "gemini-3.1-pro-preview": "gemini-2.5-pro",
+            "gemini-3-flash-preview": "gemini-2.5-flash",
         }
         if base.lower() in alias_map:
             return alias_map[base.lower()]
@@ -1062,36 +1071,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, obj, status=200, headers=None):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        for k, v in (headers or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def send_text(self, text, status=200):
         body = text.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def start_stream(self, content_type):
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Transfer-Encoding", "chunked")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def write_chunk(self, data):
-        self.wfile.write(("%X\r\n" % len(data)).encode("ascii"))
-        self.wfile.write(data)
-        self.wfile.write(b"\r\n")
-        self.wfile.flush()
+        try:
+            self.wfile.write(("%X\r\n" % len(data)).encode("ascii"))
+            self.wfile.write(data)
+            self.wfile.write(b"\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def end_stream(self):
         try:
@@ -1109,12 +1130,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(obj, status=status)
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, x-goog-api-key")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        try:
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, x-goog-api-key")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
@@ -1133,6 +1157,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json("not found: " + path, 404)
         except UpstreamError as exc:
             self.send_error_json("upstream error: %s" % (exc.body or exc), 502)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except Exception as exc:
             self.client.log("GET %s 失败: %s" % (path, exc), level="error")
             self.send_error_json("internal error: %s" % exc, 500)
@@ -1176,7 +1202,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json("upstream error: %s" % (exc.body or exc), 502)
         except ValueError as exc:
             self.send_error_json(str(exc), 400)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as exc:
             self.client.log("POST %s 失败: %s" % (path, exc), level="error")
