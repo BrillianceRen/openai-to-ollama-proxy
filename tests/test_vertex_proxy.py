@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for vertex-ollama-proxy."""
+"""Unit tests for vertex-ollama-proxy (powered by google-genai SDK)."""
 import json
 import os
 import sys
@@ -15,7 +15,6 @@ from vertex_ollama_proxy import (
     ProxyServer,
     now_iso,
     ndjson,
-    iter_sse_events,
 )
 
 
@@ -35,10 +34,11 @@ def test_vertex_model_normalization():
     assert client.normalize_model_name("flash") == "gemini-2.5-flash"
     assert client.normalize_model_name("pro") == "gemini-2.5-pro"
     assert client.normalize_model_name("") == "gemini-2.5-flash"
+    assert client.normalize_model_name("gemini-3.7-flash") == "gemini-2.5-flash"
 
 
 def test_vertex_payload_multiturn():
-    cfg = Config()
+    cfg = Config({"vertex_project": "12345"})
     client = VertexClient(cfg)
 
     messages = [
@@ -48,27 +48,26 @@ def test_vertex_payload_multiturn():
         {"role": "user", "content": "How's the weather?"}
     ]
 
-    payload = client.build_payload(
+    contents, gen_config = client.convert_messages_and_config(
         messages=messages,
         options={"temperature": 0.3, "max_tokens": 150}
     )
 
-    assert payload["systemInstruction"]["parts"][0]["text"] == "You are a concise AI."
-    assert payload["generationConfig"]["temperature"] == 0.3
-    assert payload["generationConfig"]["maxOutputTokens"] == 150
+    assert gen_config.system_instruction == "You are a concise AI."
+    assert gen_config.temperature == 0.3
+    assert gen_config.max_output_tokens == 150
 
-    contents = payload["contents"]
     assert len(contents) == 3
-    assert contents[0]["role"] == "user"
-    assert contents[0]["parts"][0]["text"] == "Hello!"
-    assert contents[1]["role"] == "model"
-    assert contents[1]["parts"][0]["text"] == "Hi!"
-    assert contents[2]["role"] == "user"
-    assert contents[2]["parts"][0]["text"] == "How's the weather?"
+    assert contents[0].role == "user"
+    assert contents[0].parts[0].text == "Hello!"
+    assert contents[1].role == "model"
+    assert contents[1].parts[0].text == "Hi!"
+    assert contents[2].role == "user"
+    assert contents[2].parts[0].text == "How's the weather?"
 
 
 def test_vertex_payload_tools():
-    cfg = Config()
+    cfg = Config({"vertex_project": "12345"})
     client = VertexClient(cfg)
 
     tools = [
@@ -86,35 +85,13 @@ def test_vertex_payload_tools():
         }
     ]
 
-    payload = client.build_payload(
+    contents, gen_config = client.convert_messages_and_config(
         messages=[{"role": "user", "content": "What is 2+2?"}],
         tools=tools
     )
 
-    assert len(payload["tools"]) == 1
-    decl = payload["tools"][0]["functionDeclarations"][0]
-    assert decl["name"] == "calc"
-    assert decl["parameters"]["required"] == ["expr"]
-
-
-def test_vertex_base_url():
-    cfg = Config({
-        "vertex_project": "123456789",
-        "vertex_location": "europe-west1"
-    })
-    client = VertexClient(cfg)
-    assert client.base_url() == "https://europe-west1-aiplatform.googleapis.com/v1beta1/projects/123456789/locations/europe-west1"
-
-
-def test_vertex_auth_headers_api_key():
-    cfg = Config({"api_key": "my-test-api-key"})
-    client = VertexClient(cfg)
-    headers = client._get_auth_headers()
-    assert headers == {"x-goog-api-key": "my-test-api-key"}
-
-
-def test_vertex_auth_headers_bearer_token():
-    cfg = Config({"bearer_token": "ya29.test-bearer-token"})
-    client = VertexClient(cfg)
-    headers = client._get_auth_headers()
-    assert headers == {"Authorization": "Bearer ya29.test-bearer-token"}
+    assert gen_config.tools is not None
+    assert len(gen_config.tools) == 1
+    decl = gen_config.tools[0].function_declarations[0]
+    assert decl.name == "calc"
+    assert getattr(decl.parameters, "required", None) == ["expr"]

@@ -4,9 +4,9 @@
 gemini-ollama-proxy
 ===================
 
-把 Google Gemini API (Interactions API / Models API) 转换为 Ollama API,
-同时提供 OpenAI 兼容接口 /v1/chat/completions 与 /v1/models。
-仅依赖 Python 标准库，零第三方依赖。敏感信息（如 API Key）从 config.json 或环境变量中读取。
+基于 Google 官方 google-genai SDK 把 Google Gemini API (Developer API)
+转换为 Ollama API, 同时提供 OpenAI 兼容接口 /v1/chat/completions 与 /v1/models。
+支持流式 NDJSON、多模态识图、工具调用 (Function Calling) 与思考流 (Thinking)。
 
 端点
 ----
@@ -14,8 +14,8 @@ GET  /                      返回 "Ollama is running"
 GET  /api/version           返回模拟的 Ollama 版本号
 GET  /api/tags              汇总 Gemini 模型列表, 优先匹配 models/gemini.json, 未命中自动生成
 POST /api/show              优先读取 models/gemini.json, 未命中自动生成模型详情
-POST /api/chat              转换为 Gemini Interactions API 转发 (支持流式 NDJSON)
-POST /api/generate          转换为 Gemini Interactions API 转发 (支持流式 NDJSON 与多模态图片)
+POST /api/chat              转换为 Gemini API 转发 (支持流式 NDJSON)
+POST /api/generate          转换为 Gemini API 转发 (支持流式 NDJSON 与多模态图片)
 GET  /api/ps                返回空模型列表 (兼容 Ollama 状态轮询)
 GET  /v1/models             OpenAI 兼容模型列表
 POST /v1/chat/completions   OpenAI 兼容请求透传 (支持流式 SSE)
@@ -36,12 +36,17 @@ import re
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
 
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
@@ -55,10 +60,9 @@ for _stream in (sys.stdout, sys.stderr):
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "config.json")
-DEFAULT_API_URL = "https://generativelanguage.googleapis.com"
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 OLLAMA_VERSION = "0.5.4"
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 def now_iso():
@@ -68,40 +72,6 @@ def now_iso():
 
 def ndjson(obj):
     return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-
-
-def iter_sse_events(resp):
-    """逐条解析 Gemini / OpenAI 的 SSE 事件, 产出 (event_type, data_dict/raw) 元组。"""
-    event_type = None
-    data_lines = []
-    for raw in resp:
-        line = raw.decode("utf-8", "replace").rstrip("\r\n")
-        if line.startswith("event:"):
-            event_type = line[len("event:"):].strip()
-        elif line.startswith("data:"):
-            data_lines.append(line[len("data:"):].strip())
-        elif line == "" and data_lines:
-            payload = "\n".join(data_lines)
-            if payload.lower() == "[done]":
-                yield ("done", "[DONE]")
-            else:
-                try:
-                    data = json.loads(payload)
-                except Exception:
-                    data = {"raw": payload}
-                yield (event_type or data.get("event_type", ""), data)
-            event_type = None
-            data_lines = []
-    if data_lines:
-        payload = "\n".join(data_lines)
-        if payload.lower() == "[done]":
-            yield ("done", "[DONE]")
-        else:
-            try:
-                data = json.loads(payload)
-            except Exception:
-                data = {"raw": payload}
-            yield (event_type or data.get("event_type", ""), data)
 
 
 class ModelNotFoundError(Exception):
@@ -126,11 +96,9 @@ class Config:
         self.host = str(data.get("host", "127.0.0.1"))
         self.port = int(data.get("port", 11434))
 
-        # 优先读取 gemini 专属节，若无则从顶层或 providers 提取
         gemini_cfg = data.get("gemini", {}) if isinstance(data.get("gemini"), dict) else {}
-        self.api_url = str(gemini_cfg.get("api_url") or data.get("api_url") or DEFAULT_API_URL).rstrip("/")
+        self.api_url = str(gemini_cfg.get("api_url") or data.get("api_url") or "").rstrip("/")
 
-        # 从环境变量、配置文件中提取 API Key（禁止硬编码）
         env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         cfg_key = gemini_cfg.get("api_key") or data.get("api_key")
         if not cfg_key and isinstance(data.get("providers"), list):
@@ -156,20 +124,20 @@ class Config:
 
 
 class GeminiClient:
-    """Google Gemini API (Interactions API / Models API) 客户端。"""
+    """基于 google-genai SDK 的 Google Gemini API 客户端。"""
 
     def __init__(self, config):
         self.config = config
         self.log_level = config.log_level
         self.lock = threading.RLock()
-        self._opener_cache = None
+        self._sdk_client = None
         self.model_cache = []
-        self.model_details_cache = {}
         self.fetched_at = 0
-        self.fetching = False
-        self.fetch_wait = threading.Condition(self.lock)
         self.models_entries = None
         self.models_defaults = {}
+
+        if genai is None:
+            raise RuntimeError("未安装 google-genai SDK。请运行: pip install google-genai")
 
     def log(self, msg, level="info"):
         levels = {"quiet": 0, "info": 1, "debug": 2}
@@ -179,100 +147,69 @@ class GeminiClient:
         stream = sys.stderr if level == "error" else sys.stdout
         print("[%s] %s" % (time.strftime("%H:%M:%S"), msg), file=stream, flush=True)
 
-    def _opener(self):
-        if self._opener_cache is None:
-            if self.config.use_env_proxy:
-                self._opener_cache = urllib.request.build_opener()
-            else:
-                self._opener_cache = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        return self._opener_cache
+    def get_sdk_client(self):
+        if self._sdk_client is None:
+            if not self.config.api_key:
+                raise ValueError("未配置 Gemini API Key。请在 config.json 中配置 gemini.api_key 或通过环境变量 GEMINI_API_KEY / 启动参数 --api-key 指定。")
+            http_options = {}
+            if self.config.api_url:
+                http_options["base_url"] = self.config.api_url
+            self._sdk_client = genai.Client(
+                api_key=self.config.api_key,
+                http_options=http_options if http_options else None
+            )
+        return self._sdk_client
 
-    def request(self, endpoint, payload=None, method=None, stream=False):
-        if not self.config.api_key:
-            raise ValueError("未配置 Gemini API Key。请在 config.json 中配置 gemini.api_key 或通过环境变量 GEMINI_API_KEY / 启动参数 --api-key 指定。")
+    def fetch_models(self):
+        if self.config.custom_models:
+            return list(self.config.custom_models)
 
-        url = self.config.api_url.rstrip("/") + "/" + endpoint.lstrip("/")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream" if stream else "application/json",
-            "x-goog-api-key": self.config.api_key,
-        }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
-        req_method = method or ("POST" if payload is not None else "GET")
-        req = urllib.request.Request(url, data=data, headers=headers, method=req_method)
-
-        started = time.time()
-        self.log("Gemini 请求 %s %s bytes=%d" % (req_method, url, len(data or b"")), level="debug")
-        try:
-            resp = self._opener().open(req, timeout=self.config.timeout)
-            self.log("Gemini 响应 status=%s type=%s elapsed=%.2fs" % (
-                resp.status, resp.headers.get("Content-Type", ""), time.time() - started), level="debug")
-            return resp
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", "replace")
-            self.log("Gemini HTTP错误 status=%s body=%s elapsed=%.2fs" % (
-                exc.code, err_body[:300], time.time() - started), level="error")
-            raise UpstreamError(exc.code, err_body) from exc
-        except urllib.error.URLError as exc:
-            self.log("Gemini 连接错误 reason=%s elapsed=%.2fs" % (exc.reason, time.time() - started), level="error")
-            raise UpstreamError(0, str(exc.reason)) from exc
-
-    def fetch_models(self, force=False):
         now = time.time()
         with self.lock:
-            if not force and self.model_cache and (now - self.fetched_at < self.config.cache_ttl):
+            if self.model_cache and now - self.fetched_at < self.config.cache_ttl:
                 return list(self.model_cache)
-            if self.fetching:
-                deadline = time.time() + self.config.fetch_wait_timeout
-                while self.fetching and time.time() < deadline:
-                    self.fetch_wait.wait(0.2)
-                if self.model_cache:
-                    return list(self.model_cache)
-            self.fetching = True
 
         try:
-            if not self.config.api_key:
-                raise ValueError("未配置 API Key")
-            ids = []
-            details = {}
-            resp = self.request("v1beta/models")
-            try:
-                raw = resp.read().decode("utf-8", "replace")
-            finally:
-                resp.close()
-            data = json.loads(raw)
-            for m in data.get("models", []):
-                full_name = str(m.get("name", "")).strip()
-                if not full_name:
-                    continue
-                clean_name = full_name.split("/", 1)[-1] if full_name.startswith("models/") else full_name
-                methods = m.get("supportedGenerationMethods", [])
-                if methods and not any(k in methods for k in ("generateContent", "interactions", "countTokens")):
-                    continue
-                ids.append(clean_name)
-                details[clean_name] = m
-                details[full_name] = m
-
-            with self.lock:
-                self.model_cache = list(ids)
-                self.model_details_cache = details
-                self.fetched_at = time.time()
-            self.log("获取到 %d 个 Gemini 模型" % len(ids))
-            return ids
+            client = self.get_sdk_client()
+            models = []
+            for m in client.models.list():
+                raw_name = str(getattr(m, "name", "") or "")
+                clean = raw_name.split("/")[-1] if raw_name.startswith("models/") else raw_name
+                # 过滤掉非文本生成模型
+                if clean and clean not in models:
+                    models.append(clean)
+            if models:
+                self.log("通过 google-genai 成功拉取 %d 个 Gemini 模型" % len(models))
+                with self.lock:
+                    self.model_cache = models
+                    self.fetched_at = now
+                return models
         except Exception as exc:
-            self.log("获取模型列表失败: %s" % exc, level="error")
-            fallback = [self.config.default_model, "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemma-4-26b-a4b-it"]
-            with self.lock:
-                self.model_cache = list(fallback)
-            return fallback
-        finally:
-            with self.lock:
-                self.fetching = False
-                self.fetch_wait.notify_all()
+            self.log("google-genai 拉取模型列表失败，使用本地模板: %s" % exc, level="debug")
+
+        templates = self.load_models_templates()
+        if templates:
+            ids = []
+            for t in templates:
+                name = t.get("model") or t.get("name")
+                if name and name not in ids:
+                    ids.append(name)
+            if ids:
+                return ids
+
+        return ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemma-4-31b-it", "gemma-4-26b-a4b-it"]
 
     def warm_models(self):
-        t = threading.Thread(target=self.fetch_models, daemon=True, name="gemini-models-warm")
-        t.start()
+        if not self.config.api_key:
+            return
+
+        def _probe():
+            try:
+                models = self.fetch_models()
+                self.log("Gemini 初始化探测成功, 可用模型数: %d" % len(models))
+            except Exception as e:
+                self.log("Gemini 初始化探测: %s" % e, level="debug")
+        threading.Thread(target=_probe, daemon=True, name="gemini-warm").start()
 
     def normalize_model_name(self, name):
         name = (name or "").strip()
@@ -292,12 +229,12 @@ class GeminiClient:
 
         alias_map = {
             "gemini": self.config.default_model,
-            "flash": "gemini-3.5-flash",
+            "flash": "gemini-3.6-flash",
             "flash-lite": "gemini-3.5-flash-lite",
             "pro": "gemini-3.1-pro-preview",
-            "gemma": "gemma-4-26b-a4b-it",
-            "gemini-flash": "gemini-3.5-flash",
+            "gemini-flash": "gemini-3.6-flash",
             "gemini-pro": "gemini-3.1-pro-preview",
+            "gemini-2.5-flash": "gemini-3.6-flash",
         }
         if base.lower() in alias_map:
             return alias_map[base.lower()]
@@ -350,7 +287,7 @@ class GeminiClient:
             tmpl = self.find_template(clean)
             tag_name = clean + ":latest"
             size = (tmpl.get("size") if tmpl else 0) or 70000000000
-            family = "gemini" if "gemini" in clean.lower() else ("gemma" if "gemma" in clean.lower() else "gemini")
+            family = "gemma" if "gemma" in clean.lower() else "gemini"
             param_size = (tmpl.get("details", {}).get("parameter_size") if tmpl else "") or "70B"
 
             tags_list.append({
@@ -374,14 +311,13 @@ class GeminiClient:
     def get_show(self, name):
         clean = self.normalize_model_name(name)
         tmpl = self.find_template(clean)
-        meta = self.model_details_cache.get(clean) or self.model_details_cache.get("models/" + clean) or {}
 
-        family = "gemini" if "gemini" in clean.lower() else ("gemma" if "gemma" in clean.lower() else "gemini")
+        family = "gemma" if "gemma" in clean.lower() else "gemini"
         param_size = (tmpl.get("details", {}).get("parameter_size") if tmpl else "") or "70B"
-        context_len = meta.get("inputTokenLimit") or (tmpl.get("model_info", {}).get("%s.context_length" % family) if tmpl else None) or self.config.default_num_ctx
+        context_len = (tmpl.get("model_info", {}).get("%s.context_length" % family) if tmpl else None) or self.config.default_num_ctx
 
         return {
-            "capabilities": (tmpl.get("capabilities") if tmpl else None) or ["completion", "tools", "thinking"],
+            "capabilities": (tmpl.get("capabilities") if tmpl else None) or ["completion", "tools", "thinking", "vision"],
             "details": {
                 "parent_model": "",
                 "format": "",
@@ -400,189 +336,168 @@ class GeminiClient:
         }
 
     @staticmethod
-    def _get_image_mime(data):
-        try:
-            raw = base64.b64decode(data.encode("ascii") if isinstance(data, str) else data)
-        except Exception:
+    def _get_image_mime(data_bytes):
+        if data_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
             return "image/png"
-        if raw.startswith(b"\x89PNG\r\n\x1a\n"):
-            return "image/png"
-        if raw.startswith(b"\xff\xd8\xff"):
+        if data_bytes.startswith(b"\xff\xd8\xff"):
             return "image/jpeg"
-        if raw[:6] in (b"GIF87a", b"GIF89a"):
+        if data_bytes[:6] in (b"GIF87a", b"GIF89a"):
             return "image/gif"
-        if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        if data_bytes[:4] == b"RIFF" and data_bytes[8:12] == b"WEBP":
             return "image/webp"
-        if raw[:2] == b"BM":
+        if data_bytes[:2] == b"BM":
             return "image/bmp"
         return "image/png"
 
-    @staticmethod
-    def _strip_data_uri(images):
-        out = []
-        for img in images or []:
-            value = str(img).strip()
-            if "," in value and value.lstrip().lower().startswith("data:"):
-                value = value.split(",", 1)[1]
-            out.append(value)
-        return out
-
-    def build_interactions_payload(self, messages, model_name, options=None, tools=None, stream=False, system=None):
-        steps = []
-        system_instruction = str(system) if system else None
+    def convert_messages_and_config(self, messages, options=None, tools=None, system=None):
+        contents = []
+        system_instruction_text = str(system) if system else None
 
         for msg in messages or []:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            msg_images = self._strip_data_uri(msg.get("images") or [])
+            msg_images = msg.get("images") or []
 
             if role == "system":
                 if isinstance(content, str):
-                    system_instruction = (system_instruction + "\n" + content) if system_instruction else content
+                    system_instruction_text = (system_instruction_text + "\n" + content) if system_instruction_text else content
                 continue
 
-            if role == "user":
-                content_parts = []
-                if isinstance(content, str) and content:
-                    content_parts.append({"type": "text", "text": content})
-                elif isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict):
-                            if part.get("type") == "text":
-                                content_parts.append({"type": "text", "text": part.get("text", "")})
-                            elif part.get("type") == "image_url":
-                                img_url = (part.get("image_url") or {}).get("url", "")
-                                if img_url.startswith("data:"):
-                                    mime = img_url.split(";")[0].replace("data:", "")
-                                    b64_data = img_url.split(",", 1)[1] if "," in img_url else ""
-                                    content_parts.append({"type": "image", "data": b64_data, "mime_type": mime})
-                        elif isinstance(part, str):
-                            content_parts.append({"type": "text", "text": part})
+            genai_role = "model" if role == "assistant" else "user"
+            parts = []
 
-                for img in msg_images:
-                    content_parts.append({"type": "image", "data": img, "mime_type": self._get_image_mime(img)})
+            if isinstance(content, str) and content:
+                parts.append(types.Part.from_text(text=content))
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            parts.append(types.Part.from_text(text=item.get("text", "")))
+                        elif item.get("type") == "image_url":
+                            img_url = (item.get("image_url") or {}).get("url", "")
+                            if img_url.startswith("data:"):
+                                mime = img_url.split(";")[0].replace("data:", "")
+                                b64 = img_url.split(",", 1)[1] if "," in img_url else ""
+                                try:
+                                    raw = base64.b64decode(b64)
+                                    parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
+                                except Exception:
+                                    pass
+                    elif isinstance(item, str):
+                        parts.append(types.Part.from_text(text=item))
 
-                if not content_parts:
-                    content_parts.append({"type": "text", "text": ""})
-                steps.append({"type": "user_input", "content": content_parts})
+            for img in msg_images:
+                val = str(img).strip()
+                if "," in val and val.lstrip().lower().startswith("data:"):
+                    val = val.split(",", 1)[1]
+                try:
+                    raw = base64.b64decode(val)
+                    mime = self._get_image_mime(raw)
+                    parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
+                except Exception:
+                    pass
 
-            elif role == "assistant":
-                if content:
-                    steps.append({"type": "model_output", "content": [{"type": "text", "text": str(content)}]})
-                for tc in msg.get("tool_calls") or []:
-                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    args = fn.get("arguments", {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except Exception:
-                            args = {"raw": args}
-                    steps.append({
-                        "type": "function_call",
-                        "id": tc.get("id", f"call_{len(steps)}"),
-                        "name": fn.get("name", ""),
-                        "arguments": args,
-                    })
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                args = fn.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {"raw": args}
+                parts.append(types.Part.from_function_call(name=fn.get("name", ""), args=args))
 
-            elif role in ("tool", "function"):
-                call_id = msg.get("tool_call_id") or msg.get("call_id") or f"call_{len(steps)}"
-                name = msg.get("name", "tool")
-                result_val = content
-                if isinstance(result_val, (dict, list)):
-                    result_val = json.dumps(result_val, ensure_ascii=False)
-                steps.append({
-                    "type": "function_result",
-                    "call_id": call_id,
-                    "name": name,
-                    "result": str(result_val),
-                })
+            if role in ("tool", "function"):
+                name = msg.get("name", "function_name")
+                resp_obj = content
+                if isinstance(resp_obj, str):
+                    try:
+                        resp_obj = json.loads(resp_obj)
+                    except Exception:
+                        resp_obj = {"result": resp_obj}
+                elif not isinstance(resp_obj, dict):
+                    resp_obj = {"result": resp_obj}
+                parts.append(types.Part.from_function_response(name=name, response=resp_obj))
 
-        if not steps:
-            steps.append({"type": "user_input", "content": [{"type": "text", "text": ""}]})
+            if not parts:
+                parts.append(types.Part.from_text(text=""))
+            contents.append(types.Content(role=genai_role, parts=parts))
 
-        gen_cfg = {}
+        if not contents:
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text="")]))
+
         opts = options or {}
-        if opts.get("temperature") is not None:
-            gen_cfg["temperature"] = float(opts["temperature"])
-        if opts.get("top_p") is not None:
-            gen_cfg["top_p"] = float(opts["top_p"])
-        if opts.get("top_k") is not None:
-            gen_cfg["top_k"] = int(opts["top_k"])
-        if opts.get("num_predict") is not None and int(opts["num_predict"]) > 0:
-            gen_cfg["max_output_tokens"] = int(opts["num_predict"])
-        elif opts.get("max_tokens") is not None and int(opts["max_tokens"]) > 0:
-            gen_cfg["max_output_tokens"] = int(opts["max_tokens"])
-        if opts.get("stop"):
-            stop = opts["stop"]
-            gen_cfg["stop_sequences"] = [stop] if isinstance(stop, str) else list(stop)
-        if opts.get("thinking_level"):
-            gen_cfg["thinking_level"] = str(opts["thinking_level"])
-
-        payload = {
-            "model": self.normalize_model_name(model_name),
-            "input": steps,
-            "stream": bool(stream),
-        }
-        if system_instruction:
-            payload["system_instruction"] = system_instruction
-        if gen_cfg:
-            payload["generation_config"] = gen_cfg
-
+        sdk_tools = None
         if tools:
-            converted_tools = []
+            decls = []
             for t in tools:
                 if t.get("type") == "function":
                     fn = t.get("function", {})
-                    converted_tools.append({
-                        "type": "function",
-                        "name": fn.get("name", ""),
-                        "description": fn.get("description", ""),
-                        "parameters": fn.get("parameters", {}),
-                    })
+                    decls.append(types.FunctionDeclaration(
+                        name=fn.get("name"),
+                        description=fn.get("description"),
+                        parameters=fn.get("parameters")
+                    ))
                 elif t.get("name"):
-                    converted_tools.append(t)
-            if converted_tools:
-                payload["tools"] = converted_tools
+                    decls.append(types.FunctionDeclaration(
+                        name=t.get("name"),
+                        description=t.get("description"),
+                        parameters=t.get("parameters")
+                    ))
+            if decls:
+                sdk_tools = [types.Tool(function_declarations=decls)]
 
-        return payload
+        gen_config = types.GenerateContentConfig(
+            system_instruction=system_instruction_text,
+            temperature=float(opts["temperature"]) if opts.get("temperature") is not None else None,
+            top_p=float(opts["top_p"]) if opts.get("top_p") is not None else None,
+            top_k=int(opts["top_k"]) if opts.get("top_k") is not None else None,
+            max_output_tokens=int(opts["num_predict"] if opts.get("num_predict") and int(opts["num_predict"]) > 0 else (opts.get("max_tokens") or 0)) or None,
+            stop_sequences=[opts["stop"]] if isinstance(opts.get("stop"), str) else (list(opts["stop"]) if opts.get("stop") else None),
+            tools=sdk_tools,
+        )
+
+        return contents, gen_config
 
     def chat(self, body):
         t0 = time.time()
         model_name = body.get("model", "")
-        payload = self.build_interactions_payload(
+        clean_model = self.normalize_model_name(model_name)
+        contents, config = self.convert_messages_and_config(
             messages=body.get("messages", []),
-            model_name=model_name,
             options=body.get("options", {}),
-            tools=body.get("tools"),
-            stream=False
+            tools=body.get("tools")
         )
-        self.log("chat model=%s target=%s stream=false" % (model_name, payload["model"]))
-        resp = self.request("v1beta/interactions", payload=payload)
+        self.log("chat model=%s target=%s stream=false" % (model_name, clean_model))
+        client = self.get_sdk_client()
         try:
-            raw = resp.read().decode("utf-8", "replace")
-        finally:
-            resp.close()
-        data = json.loads(raw)
+            resp = client.models.generate_content(
+                model=clean_model,
+                contents=contents,
+                config=config
+            )
+        except Exception as exc:
+            self.log("Gemini SDK 错误: %s" % exc, level="error")
+            raise UpstreamError(500, str(exc)) from exc
 
         text_parts = []
         tool_calls = []
-        for step in data.get("steps", []):
-            stype = step.get("type")
-            if stype == "model_output":
-                for c in step.get("content", []):
-                    if c.get("type") == "text":
-                        text_parts.append(c.get("text", ""))
-            elif stype == "function_call":
-                tool_calls.append({
-                    "function": {
-                        "name": step.get("name", ""),
-                        "arguments": step.get("arguments", {})
-                    }
-                })
+        if resp.candidates:
+            cand = resp.candidates[0]
+            if cand.content:
+                for p in cand.content.parts:
+                    if getattr(p, "text", None):
+                        text_parts.append(p.text)
+                    elif getattr(p, "function_call", None):
+                        tool_calls.append({
+                            "function": {
+                                "name": p.function_call.name,
+                                "arguments": getattr(p.function_call, "args", {})
+                            }
+                        })
 
-        usage = data.get("usage", {})
-        prompt_tokens = usage.get("total_input_tokens", 0)
-        completion_tokens = usage.get("total_output_tokens", 0)
+        prompt_tokens = getattr(resp.usage_metadata, "prompt_token_count", 0) if resp.usage_metadata else 0
+        completion_tokens = getattr(resp.usage_metadata, "candidates_token_count", 0) if resp.usage_metadata else 0
 
         omsg = {"role": "assistant", "content": "".join(text_parts)}
         done_reason = "stop"
@@ -608,55 +523,50 @@ class GeminiClient:
     def chat_stream(self, body, write):
         t0 = time.time()
         model_name = body.get("model", "")
-        payload = self.build_interactions_payload(
+        clean_model = self.normalize_model_name(model_name)
+        contents, config = self.convert_messages_and_config(
             messages=body.get("messages", []),
-            model_name=model_name,
             options=body.get("options", {}),
-            tools=body.get("tools"),
-            stream=True
+            tools=body.get("tools")
         )
-        self.log("chat model=%s target=%s stream=true" % (model_name, payload["model"]))
-        resp = self.request("v1beta/interactions", payload=payload, stream=True)
+        self.log("chat model=%s target=%s stream=true" % (model_name, clean_model))
+        client = self.get_sdk_client()
 
         tool_calls = []
-        usage = {}
+        prompt_tokens = 0
+        completion_tokens = 0
         final_reason = "stop"
 
         try:
-            for event_type, data in iter_sse_events(resp):
-                if event_type == "done":
-                    break
-                if not isinstance(data, dict):
-                    continue
-
-                if event_type == "step.delta":
-                    delta = data.get("delta", {})
-                    dtype = delta.get("type")
-                    if dtype == "text":
-                        text = delta.get("text", "")
-                        if text:
-                            write(ndjson({
-                                "model": model_name,
-                                "created_at": now_iso(),
-                                "message": {"role": "assistant", "content": text},
-                                "done": False,
-                            }))
-                elif event_type == "step.start":
-                    step = data.get("step", {})
-                    if step.get("type") == "function_call":
-                        tool_calls.append({
-                            "function": {
-                                "name": step.get("name", ""),
-                                "arguments": step.get("arguments", {})
-                            }
-                        })
-                elif event_type == "interaction.completed":
-                    interaction = data.get("interaction", {})
-                    usage = interaction.get("usage", {})
-                    if interaction.get("status") == "requires_action" or tool_calls:
-                        final_reason = "tool_calls"
-        finally:
-            resp.close()
+            for chunk in client.models.generate_content_stream(
+                model=clean_model,
+                contents=contents,
+                config=config
+            ):
+                if chunk.candidates:
+                    cand = chunk.candidates[0]
+                    if cand.content:
+                        for p in cand.content.parts:
+                            if getattr(p, "text", None) and p.text:
+                                write(ndjson({
+                                    "model": model_name,
+                                    "created_at": now_iso(),
+                                    "message": {"role": "assistant", "content": p.text},
+                                    "done": False,
+                                }))
+                            elif getattr(p, "function_call", None):
+                                tool_calls.append({
+                                    "function": {
+                                        "name": p.function_call.name,
+                                        "arguments": getattr(p.function_call, "args", {})
+                                    }
+                                })
+                if chunk.usage_metadata:
+                    prompt_tokens = getattr(chunk.usage_metadata, "prompt_token_count", prompt_tokens)
+                    completion_tokens = getattr(chunk.usage_metadata, "candidates_token_count", completion_tokens)
+        except Exception as exc:
+            self.log("Gemini 流式错误: %s" % exc, level="error")
+            raise UpstreamError(500, str(exc)) from exc
 
         final_msg = {"role": "assistant", "content": ""}
         if tool_calls:
@@ -671,45 +581,46 @@ class GeminiClient:
             "done_reason": final_reason,
             "total_duration": int((time.time() - t0) * 1e9),
             "load_duration": 0,
-            "prompt_eval_count": usage.get("total_input_tokens", 0),
-            "eval_count": usage.get("total_output_tokens", 0),
+            "prompt_eval_count": prompt_tokens,
+            "eval_count": completion_tokens,
         }))
         self.log("chat 流式完成 model=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
-            model_name, usage.get("total_input_tokens", 0), usage.get("total_output_tokens", 0), time.time() - t0))
+            model_name, prompt_tokens, completion_tokens, time.time() - t0))
 
     def generate(self, body):
         t0 = time.time()
         model_name = body.get("model", "")
+        clean_model = self.normalize_model_name(model_name)
         prompt = body.get("prompt", "")
         images = body.get("images") or []
         system = body.get("system")
-
         messages = [{"role": "user", "content": prompt, "images": images}]
-        payload = self.build_interactions_payload(
+
+        contents, config = self.convert_messages_and_config(
             messages=messages,
-            model_name=model_name,
             options=body.get("options", {}),
-            stream=False,
             system=system
         )
-        self.log("generate model=%s target=%s stream=false" % (model_name, payload["model"]))
-        resp = self.request("v1beta/interactions", payload=payload)
+        self.log("generate model=%s target=%s stream=false" % (model_name, clean_model))
+        client = self.get_sdk_client()
         try:
-            raw = resp.read().decode("utf-8", "replace")
-        finally:
-            resp.close()
-        data = json.loads(raw)
+            resp = client.models.generate_content(
+                model=clean_model,
+                contents=contents,
+                config=config
+            )
+        except Exception as exc:
+            self.log("Gemini SDK 错误: %s" % exc, level="error")
+            raise UpstreamError(500, str(exc)) from exc
 
         text_parts = []
-        for step in data.get("steps", []):
-            if step.get("type") == "model_output":
-                for c in step.get("content", []):
-                    if c.get("type") == "text":
-                        text_parts.append(c.get("text", ""))
+        if resp.candidates and resp.candidates[0].content:
+            for p in resp.candidates[0].content.parts:
+                if getattr(p, "text", None):
+                    text_parts.append(p.text)
 
-        usage = data.get("usage", {})
-        prompt_tokens = usage.get("total_input_tokens", 0)
-        completion_tokens = usage.get("total_output_tokens", 0)
+        prompt_tokens = getattr(resp.usage_metadata, "prompt_token_count", 0) if resp.usage_metadata else 0
+        completion_tokens = getattr(resp.usage_metadata, "candidates_token_count", 0) if resp.usage_metadata else 0
 
         out = {
             "model": model_name,
@@ -730,45 +641,44 @@ class GeminiClient:
     def generate_stream(self, body, write):
         t0 = time.time()
         model_name = body.get("model", "")
+        clean_model = self.normalize_model_name(model_name)
         prompt = body.get("prompt", "")
         images = body.get("images") or []
         system = body.get("system")
-
         messages = [{"role": "user", "content": prompt, "images": images}]
-        payload = self.build_interactions_payload(
+
+        contents, config = self.convert_messages_and_config(
             messages=messages,
-            model_name=model_name,
             options=body.get("options", {}),
-            stream=True,
             system=system
         )
-        self.log("generate model=%s target=%s stream=true" % (model_name, payload["model"]))
-        resp = self.request("v1beta/interactions", payload=payload, stream=True)
+        self.log("generate model=%s target=%s stream=true" % (model_name, clean_model))
+        client = self.get_sdk_client()
 
-        usage = {}
+        prompt_tokens = 0
+        completion_tokens = 0
+
         try:
-            for event_type, data in iter_sse_events(resp):
-                if event_type == "done":
-                    break
-                if not isinstance(data, dict):
-                    continue
-
-                if event_type == "step.delta":
-                    delta = data.get("delta", {})
-                    if delta.get("type") == "text":
-                        text = delta.get("text", "")
-                        if text:
+            for chunk in client.models.generate_content_stream(
+                model=clean_model,
+                contents=contents,
+                config=config
+            ):
+                if chunk.candidates and chunk.candidates[0].content:
+                    for p in chunk.candidates[0].content.parts:
+                        if getattr(p, "text", None) and p.text:
                             write(ndjson({
                                 "model": model_name,
                                 "created_at": now_iso(),
-                                "response": text,
+                                "response": p.text,
                                 "done": False,
                             }))
-                elif event_type == "interaction.completed":
-                    interaction = data.get("interaction", {})
-                    usage = interaction.get("usage", {})
-        finally:
-            resp.close()
+                if chunk.usage_metadata:
+                    prompt_tokens = getattr(chunk.usage_metadata, "prompt_token_count", prompt_tokens)
+                    completion_tokens = getattr(chunk.usage_metadata, "candidates_token_count", completion_tokens)
+        except Exception as exc:
+            self.log("Gemini 流式错误: %s" % exc, level="error")
+            raise UpstreamError(500, str(exc)) from exc
 
         write(ndjson({
             "model": model_name,
@@ -779,11 +689,11 @@ class GeminiClient:
             "context": [],
             "total_duration": int((time.time() - t0) * 1e9),
             "load_duration": 0,
-            "prompt_eval_count": usage.get("total_input_tokens", 0),
-            "eval_count": usage.get("total_output_tokens", 0),
+            "prompt_eval_count": prompt_tokens,
+            "eval_count": completion_tokens,
         }))
         self.log("generate 流式完成 model=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
-            model_name, usage.get("total_input_tokens", 0), usage.get("total_output_tokens", 0), time.time() - t0))
+            model_name, prompt_tokens, completion_tokens, time.time() - t0))
 
     def v1_models(self):
         model_ids = self.fetch_models()
@@ -799,56 +709,29 @@ class GeminiClient:
 
     def v1_chat(self, body, stream=False):
         model_name = body.get("model", "")
+        clean_model = self.normalize_model_name(model_name)
         options = {}
         for key in ("temperature", "top_p", "top_k", "max_tokens", "stop"):
             if body.get(key) is not None:
                 options[key] = body[key]
 
-        payload = self.build_interactions_payload(
-            messages=body.get("messages", []),
-            model_name=model_name,
-            options=options,
-            tools=body.get("tools"),
-            stream=stream
-        )
-
         if not stream:
-            resp = self.request("v1beta/interactions", payload=payload)
-            try:
-                raw = resp.read().decode("utf-8", "replace")
-            finally:
-                resp.close()
-            data = json.loads(raw)
-
-            text_parts = []
+            chat_res = self.chat({"model": clean_model, "messages": body.get("messages", []), "options": options, "tools": body.get("tools")})
+            omsg = chat_res.get("message", {})
             tool_calls = []
-            for step in data.get("steps", []):
-                stype = step.get("type")
-                if stype == "model_output":
-                    for c in step.get("content", []):
-                        if c.get("type") == "text":
-                            text_parts.append(c.get("text", ""))
-                elif stype == "function_call":
-                    args = step.get("arguments", {})
-                    args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
-                    tool_calls.append({
-                        "id": step.get("id", f"call_{len(tool_calls)}"),
-                        "type": "function",
-                        "function": {
-                            "name": step.get("name", ""),
-                            "arguments": args_str,
-                        }
-                    })
+            for i, tc in enumerate(omsg.get("tool_calls") or []):
+                fn = tc.get("function", {})
+                args = fn.get("arguments", {})
+                args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {"name": fn.get("name", ""), "arguments": args_str}
+                })
 
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("total_input_tokens", 0)
-            completion_tokens = usage.get("total_output_tokens", 0)
-
-            msg = {"role": "assistant", "content": "".join(text_parts) if text_parts else None}
-            finish_reason = "stop"
+            msg = {"role": "assistant", "content": omsg.get("content") or None}
             if tool_calls:
                 msg["tool_calls"] = tool_calls
-                finish_reason = "tool_calls"
 
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
@@ -858,50 +741,51 @@ class GeminiClient:
                 "choices": [{
                     "index": 0,
                     "message": msg,
-                    "finish_reason": finish_reason,
+                    "finish_reason": chat_res.get("done_reason", "stop"),
                 }],
                 "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens,
+                    "prompt_tokens": chat_res.get("prompt_eval_count", 0),
+                    "completion_tokens": chat_res.get("eval_count", 0),
+                    "total_tokens": chat_res.get("prompt_eval_count", 0) + chat_res.get("eval_count", 0),
                 }
             }
 
-        return self._v1_chat_stream(payload, model_name)
+        return self._v1_chat_stream(body, clean_model, model_name, options)
 
-    def _v1_chat_stream(self, payload, model_name):
+    def _v1_chat_stream(self, body, clean_model, model_name, options):
         base_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
-        resp = self.request("v1beta/interactions", payload=payload, stream=True)
-
-        tool_calls = []
         finish_reason = "stop"
-        usage = {}
+        tool_calls = []
+        prompt_tokens = 0
+        completion_tokens = 0
 
-        try:
-            for event_type, data in iter_sse_events(resp):
-                if event_type == "done":
-                    break
-                if not isinstance(data, dict):
-                    continue
+        contents, config = self.convert_messages_and_config(
+            messages=body.get("messages", []),
+            options=options,
+            tools=body.get("tools")
+        )
+        client = self.get_sdk_client()
 
-                if event_type == "step.delta":
-                    delta = data.get("delta", {})
-                    if delta.get("type") == "text":
-                        text = delta.get("text", "")
-                        if text:
-                            chunk = {
-                                "id": base_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model_name,
-                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-                            }
-                            yield ("data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n").encode("utf-8")
-                elif event_type == "step.start":
-                    step = data.get("step", {})
-                    if step.get("type") == "function_call":
-                        args = step.get("arguments", {})
+        for chunk in client.models.generate_content_stream(
+            model=clean_model,
+            contents=contents,
+            config=config
+        ):
+            if chunk.candidates and chunk.candidates[0].content:
+                for p in chunk.candidates[0].content.parts:
+                    if getattr(p, "text", None) and p.text:
+                        item = {
+                            "id": base_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_name,
+                            "choices": [{"index": 0, "delta": {"content": p.text}, "finish_reason": None}],
+                        }
+                        yield ("data: " + json.dumps(item, ensure_ascii=False) + "\n\n").encode("utf-8")
+                    elif getattr(p, "function_call", None):
+                        fn = p.function_call
+                        args = getattr(fn, "args", {})
                         args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
                         tc_chunk = {
                             "id": base_id,
@@ -910,24 +794,18 @@ class GeminiClient:
                             "model": model_name,
                             "choices": [{"index": 0, "delta": {"tool_calls": [{
                                 "index": len(tool_calls),
-                                "id": step.get("id", f"call_{len(tool_calls)}"),
+                                "id": f"call_{len(tool_calls)}",
                                 "type": "function",
-                                "function": {"name": step.get("name", ""), "arguments": args_str},
+                                "function": {"name": getattr(fn, "name", ""), "arguments": args_str},
                             }]}, "finish_reason": None}],
                         }
-                        tool_calls.append(step)
+                        tool_calls.append(fn)
                         finish_reason = "tool_calls"
                         yield ("data: " + json.dumps(tc_chunk, ensure_ascii=False) + "\n\n").encode("utf-8")
-                elif event_type == "interaction.completed":
-                    interaction = data.get("interaction", {})
-                    usage = interaction.get("usage", {})
-                    if interaction.get("status") == "requires_action" or tool_calls:
-                        finish_reason = "tool_calls"
-        finally:
-            resp.close()
+            if chunk.usage_metadata:
+                prompt_tokens = getattr(chunk.usage_metadata, "prompt_token_count", prompt_tokens)
+                completion_tokens = getattr(chunk.usage_metadata, "candidates_token_count", completion_tokens)
 
-        prompt_tokens = usage.get("total_input_tokens", 0)
-        completion_tokens = usage.get("total_output_tokens", 0)
         final_chunk = {
             "id": base_id,
             "object": "chat.completion.chunk",
@@ -935,7 +813,7 @@ class GeminiClient:
             "model": model_name,
             "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
         }
-        if usage:
+        if prompt_tokens or completion_tokens:
             final_chunk["usage"] = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -997,36 +875,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, obj, status=200, headers=None):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        for k, v in (headers or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def send_text(self, text, status=200):
         body = text.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def start_stream(self, content_type):
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Transfer-Encoding", "chunked")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def write_chunk(self, data):
-        self.wfile.write(("%X\r\n" % len(data)).encode("ascii"))
-        self.wfile.write(data)
-        self.wfile.write(b"\r\n")
-        self.wfile.flush()
+        try:
+            self.wfile.write(("%X\r\n" % len(data)).encode("ascii"))
+            self.wfile.write(data)
+            self.wfile.write(b"\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def end_stream(self):
         try:
@@ -1044,12 +934,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(obj, status=status)
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, x-goog-api-key")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        try:
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, x-goog-api-key")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
@@ -1068,6 +961,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json("not found: " + path, 404)
         except UpstreamError as exc:
             self.send_error_json("upstream error: %s" % (exc.body or exc), 502)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except Exception as exc:
             self.client.log("GET %s 失败: %s" % (path, exc), level="error")
             self.send_error_json("internal error: %s" % exc, 500)
@@ -1111,7 +1006,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json("upstream error: %s" % (exc.body or exc), 502)
         except ValueError as exc:
             self.send_error_json(str(exc), 400)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as exc:
             self.client.log("POST %s 失败: %s" % (path, exc), level="error")
@@ -1128,10 +1023,9 @@ class ProxyServer(ThreadingHTTPServer):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Google Gemini Interactions API -> Ollama API 代理")
+    parser = argparse.ArgumentParser(description="Google Gemini API -> Ollama API 代理 (基于 google-genai SDK)")
     parser.add_argument("--api-key", default=None, help="Gemini API Key (也可通过 config.json 或环境变量 GEMINI_API_KEY 配置)")
-    parser.add_argument("--api-url", default=None, help="Gemini API 根地址 (默认 https://generativelanguage.googleapis.com)")
-    parser.add_argument("--default-model", default=None, help="默认模型 (默认 gemini-3.5-flash)")
+    parser.add_argument("--default-model", default=None, help="默认模型 (默认 gemini-3.6-flash)")
     parser.add_argument("--config", default=None, help="配置文件路径 (默认查找 config.json)")
     parser.add_argument("--host", default=None, help="监听地址 (默认 127.0.0.1)")
     parser.add_argument("--port", type=int, default=None, help="监听端口 (默认 11434)")
@@ -1153,8 +1047,6 @@ def main():
     config = Config(cfg_data, cfg_base_dir)
     if args.api_key:
         config.api_key = args.api_key
-    if args.api_url:
-        config.api_url = args.api_url
     if args.default_model:
         config.default_model = args.default_model
     if args.host:
@@ -1169,11 +1061,10 @@ def main():
 
     server = ProxyServer((config.host, config.port), Handler, client)
 
-    print("gemini-ollama-proxy 已启动: http://%s:%d" % (config.host, config.port))
-    print("  - 上游 API: %s/v1beta/interactions" % config.api_url)
+    print("gemini-ollama-proxy 已启动: http://%s:%d (引擎: google-genai SDK)" % (config.host, config.port))
     print("  - 默认模型: %s" % config.default_model)
-    key_display = (config.api_key[:6] + "..." + config.api_key[-4:]) if len(config.api_key) > 10 else (config.api_key or "(未设置，请在 config.json 中配置)")
-    print("  - API Key: %s" % key_display)
+    key_info = (config.api_key[:6] + "..." + config.api_key[-4:]) if len(config.api_key) > 10 else (config.api_key or "未配置")
+    print("  - API Key: %s" % key_info)
     print("日志级别: %s (--verbose 可开启 debug)" % config.log_level)
     print("按 Ctrl+C 停止")
 
