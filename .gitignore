@@ -5,6 +5,8 @@ config.*.json
 gemini_config.json
 vertex_config.json
 secrets.json
+adc.json
+*.credentials.json
 .env
 .env.*
 
