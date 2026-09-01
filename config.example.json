@@ -12,6 +12,17 @@
   "models_dir": "models",
   "use_env_proxy": true,
   "log_level": "info",
+  "gemini": {
+    "api_key": "AQ.请填入你的GeminiApiKey",
+    "api_url": "https://generativelanguage.googleapis.com",
+    "default_model": "gemini-3.5-flash"
+  },
+  "vertex": {
+    "api_key": "AQ.请填入你的VertexApiKey",
+    "vertex_project": "你的GoogleCloud项目号或ID",
+    "vertex_location": "us-central1",
+    "default_model": "gemini-2.5-flash"
+  },
   "providers": [
     {
       "name": "deepseek",

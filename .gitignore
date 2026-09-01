@@ -1,5 +1,12 @@
 # 本地配置(含 API Key), 禁止入库; 模板见 config.example.json
 config.json
+config.*.json
+*.local.json
+gemini_config.json
+vertex_config.json
+secrets.json
+.env
+.env.*
 
 # Python 运行时产物
 __pycache__/

@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openai-ollama-proxy"
-version = "1.1.0"
-description = "OpenAI-compatible API -> Ollama API proxy (stdlib only), for VS Code / VS Copilot custom models"
+version = "1.2.0"
+description = "OpenAI / Gemini / Vertex AI compatible API -> Ollama API proxy (stdlib only), for VS Copilot custom models"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
-keywords = ["ollama", "openai", "proxy", "copilot", "multimodal", "llm"]
+keywords = ["ollama", "openai", "gemini", "vertex", "proxy", "copilot", "multimodal", "llm"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
@@ -27,10 +28,12 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 openai-ollama-proxy = "openai_ollama_proxy:main"
+gemini-ollama-proxy = "gemini_ollama_proxy:main"
+vertex-ollama-proxy = "vertex_ollama_proxy:main"
 
 [tool.setuptools]
-py-modules = ["openai_ollama_proxy"]
+py-modules = ["openai_ollama_proxy", "gemini_ollama_proxy", "vertex_ollama_proxy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --basetemp=.pytest-tmp"

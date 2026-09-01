@@ -382,8 +382,11 @@ class Proxy:
             self.model_routes.setdefault(str(upstream_id).lower(), route)
 
     def _register_provider_model(self, provider, upstream_id):
+        # 使用与 _public_model_name_for 相同的命名逻辑：优先用 JSON 中的 name，否则从 upstream_id 推断
+        entry, _path = self.find_models_entry(provider, upstream_id)
+        display_name = entry.get("name") if entry else ""
         plain = str(upstream_id) if ":" in str(upstream_id) else str(upstream_id) + ":latest"
-        qualified = self._qualified_model_name(upstream_id, provider.name)
+        qualified = self._qualified_model_name(display_name or upstream_id, provider.name)
         self._register_route(provider, upstream_id, plain)
         self._register_route(provider, upstream_id, qualified)
 
@@ -400,12 +403,15 @@ class Proxy:
         for item in self.list_models_files():
             provider = self.get_provider(item["provider"])
             if provider:
-                self._register_provider_model(provider, item["upstream"])
-                if isinstance(item.get("data"), dict) and item["data"] and item.get("name"):
-                    self._register_route(provider, item["upstream"], item["name"])
-                    self._register_route(
-                        provider, item["upstream"],
-                        self._qualified_model_name(item["name"], provider.name))
+                # 仅为明确配置在 provider.models 中的模型注册路由
+                # 这些模型确定存在于上游；未配置 models 的 provider 将在首次拉取上游后注册
+                if not provider.models or item["upstream"] in provider.models:
+                    self._register_provider_model(provider, item["upstream"])
+                    if isinstance(item.get("data"), dict) and item["data"] and item.get("name"):
+                        self._register_route(provider, item["upstream"], item["name"])
+                        self._register_route(
+                            provider, item["upstream"],
+                            self._qualified_model_name(item["name"], provider.name))
 
     def upstream_request(self, provider, url, payload=None):
         headers = {
@@ -899,15 +905,14 @@ class Proxy:
         return generate()
 
     def _provider_model_ids(self, provider):
-        """合并远端发现的模型与 provider 静态目录；静态目录可在上游失败时兜底。"""
+        """返回指定 provider 的模型 ID 列表：优先上游模型，静态目录在未获取到上游模型时作为兜底。"""
         ids = list(self.fetch_provider_models(provider))
-        existing_bases = {self._model_base(mid).lower() for mid in ids}
-        catalog_ids = [item["upstream"] for item in self.list_models_files()
-                       if item["provider"].lower() == provider.name.lower()]
-        for mid in catalog_ids:
-            if mid not in ids and self._model_base(mid).lower() not in existing_bases:
-                ids.append(mid)
-                existing_bases.add(self._model_base(mid).lower())
+        if not ids:
+            catalog_ids = [item["upstream"] for item in self.list_models_files()
+                           if item["provider"].lower() == provider.name.lower()]
+            for mid in catalog_ids:
+                if mid not in ids:
+                    ids.append(mid)
         return ids
 
     # ---------------- /api/tags and /api/show responses ----------------

@@ -1,0 +1,101 @@
+{
+  "provider": "vertex",
+  "defaults": {
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking"
+    ],
+    "details": {
+      "parent_model": "",
+      "format": "",
+      "family": "gemini",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": ""
+    },
+    "context_length": 1048576,
+    "embedding_length": 4096,
+    "size": 0,
+    "digest": ""
+  },
+  "models": [
+    {
+      "name": "gemini-2.5-flash",
+      "model": "gemini-2.5-flash",
+      "digest": "vertex25flash0",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "70B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "model": "gemini-2.5-pro",
+      "digest": "vertex25pro000",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "200B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-flash-lite",
+      "model": "gemini-2.5-flash-lite",
+      "digest": "vertex25flashlite",
+      "size": 20000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "20B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 20000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    }
+  ]
+}

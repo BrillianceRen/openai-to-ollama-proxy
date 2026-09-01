@@ -1,0 +1,256 @@
+{
+  "provider": "gemini",
+  "defaults": {
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking"
+    ],
+    "details": {
+      "parent_model": "",
+      "format": "",
+      "family": "gemini",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": ""
+    },
+    "context_length": 1048576,
+    "embedding_length": 4096,
+    "size": 0,
+    "digest": ""
+  },
+  "models": [
+    {
+      "name": "gemini-2.5-flash",
+      "model": "gemini-2.5-flash",
+      "digest": "gemini25flash0",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "70B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "model": "gemini-2.5-pro",
+      "digest": "gemini25pro000",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "200B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-flash-lite",
+      "model": "gemini-2.5-flash-lite",
+      "digest": "gemini25flashlite0",
+      "size": 20000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "20B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 20000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.7-flash",
+      "model": "gemini-3.7-flash",
+      "digest": "gemini37flash0",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "70B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.5-flash",
+      "model": "gemini-3.5-flash",
+      "digest": "gemini35flash0",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "70B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.5-flash-lite",
+      "model": "gemini-3.5-flash-lite",
+      "digest": "gemini35flashlite0",
+      "size": 20000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "20B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 20000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.1-pro-preview",
+      "model": "gemini-3.1-pro-preview",
+      "digest": "gemini31proprev0",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "200B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemma-4-26b-a4b-it",
+      "model": "gemma-4-26b-a4b-it",
+      "digest": "gemma426ba4bit0",
+      "size": 26000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemma",
+        "families": null,
+        "parameter_size": "26B",
+        "quantization_level": "bfloat16"
+      },
+      "model_info": {
+        "general.architecture": "gemma",
+        "general.parameter_count": 26000000000,
+        "gemma.context_length": 262144,
+        "gemma.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "name": "gemma-4-31b-it",
+      "model": "gemma-4-31b-it",
+      "digest": "gemma431bit0",
+      "size": 31000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemma",
+        "families": null,
+        "parameter_size": "31B",
+        "quantization_level": "bfloat16"
+      },
+      "model_info": {
+        "general.architecture": "gemma",
+        "general.parameter_count": 31000000000,
+        "gemma.context_length": 262144,
+        "gemma.embedding_length": 4096
+      },
+      "modified_at": "2026-08-01T00:00:00Z"
+    }
+  ]
+}
