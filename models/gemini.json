@@ -98,6 +98,33 @@
       "modified_at": "2026-08-01T00:00:00Z"
     },
     {
+      "name": "gemini-3.6-flash",
+      "model": "gemini-3.6-flash",
+      "digest": "gemini36flash0",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "gemini",
+        "families": null,
+        "parameter_size": "70B",
+        "quantization_level": "none"
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 4096
+      },
+      "modified_at": "2026-08-25T00:00:00Z"
+    },
+    {
       "name": "gemini-3.7-flash",
       "model": "gemini-3.7-flash",
       "digest": "gemini37flash0",
