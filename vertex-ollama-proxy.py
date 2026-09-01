@@ -496,24 +496,14 @@ class VertexClient:
             for tc in msg.get("tool_calls") or []:
                 fn = tc.get("function", {}) if isinstance(tc, dict) else {}
                 args = fn.get("arguments", {})
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        args = {"raw": args}
-                parts.append(types.Part.from_function_call(name=fn.get("name", ""), args=args))
+                args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+                parts.append(types.Part.from_text(text=f"[Call tool `{fn.get('name', '')}` with arguments: {args_str}]"))
 
             if role in ("tool", "function"):
                 name = msg.get("name", "function_name")
-                resp_obj = content
-                if isinstance(resp_obj, str):
-                    try:
-                        resp_obj = json.loads(resp_obj)
-                    except Exception:
-                        resp_obj = {"result": resp_obj}
-                elif not isinstance(resp_obj, dict):
-                    resp_obj = {"result": resp_obj}
-                parts.append(types.Part.from_function_response(name=name, response=resp_obj))
+                resp_str = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                parts.append(types.Part.from_text(text=f"[Tool `{name}` result: {resp_str}]"))
+                genai_role = "user"
 
             if not parts:
                 parts.append(types.Part.from_text(text=""))
@@ -1075,15 +1065,25 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat":
                 if body.get("stream"):
                     self.start_stream("application/x-ndjson")
-                    self.client.chat_stream(body, self.write_chunk)
-                    self.end_stream()
+                    try:
+                        self.client.chat_stream(body, self.write_chunk)
+                    except Exception as stream_exc:
+                        self.client.log("API chat 流式异常: %s" % stream_exc, level="error")
+                        self.write_chunk(ndjson({"error": str(stream_exc), "done": True}))
+                    finally:
+                        self.end_stream()
                 else:
                     self.send_json(self.client.chat(body))
             elif path == "/api/generate":
                 if body.get("stream"):
                     self.start_stream("application/x-ndjson")
-                    self.client.generate_stream(body, self.write_chunk)
-                    self.end_stream()
+                    try:
+                        self.client.generate_stream(body, self.write_chunk)
+                    except Exception as stream_exc:
+                        self.client.log("API generate 流式异常: %s" % stream_exc, level="error")
+                        self.write_chunk(ndjson({"error": str(stream_exc), "done": True}))
+                    finally:
+                        self.end_stream()
                 else:
                     self.send_json(self.client.generate(body))
             elif path == "/api/show":
@@ -1094,9 +1094,22 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/v1/chat/completions":
                 if body.get("stream"):
                     self.start_stream("text/event-stream")
-                    for chunk in self.client.v1_chat(body, stream=True):
-                        self.write_chunk(chunk)
-                    self.end_stream()
+                    try:
+                        for chunk in self.client.v1_chat(body, stream=True):
+                            self.write_chunk(chunk)
+                    except Exception as stream_exc:
+                        self.client.log("OpenAI v1_chat 流式异常: %s" % stream_exc, level="error")
+                        err_chunk = {
+                            "error": {
+                                "message": str(stream_exc),
+                                "type": "upstream_error",
+                                "code": 500
+                            }
+                        }
+                        self.write_chunk(("data: " + json.dumps(err_chunk, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                        self.write_chunk(b"data: [DONE]\n\n")
+                    finally:
+                        self.end_stream()
                 else:
                     self.send_json(self.client.v1_chat(body, stream=False))
             else:
