@@ -216,9 +216,14 @@ class VertexClient:
 
     def _get_auth_headers(self):
         """生成鉴权请求头：优先 OAuth2 Bearer Token / ADC 刷新，其次 API Key。"""
+        headers = {}
+        if self.config.vertex_project:
+            headers["X-Goog-User-Project"] = self.config.vertex_project
+
         # 1. 直接提供 Bearer Token
         if self.config.bearer_token:
-            return {"Authorization": f"Bearer {self.config.bearer_token}"}
+            headers["Authorization"] = f"Bearer {self.config.bearer_token}"
+            return headers
 
         # 2. 如果配置了凭据文件 (ADC JSON 或 service_account.json)，自动刷新 OAuth2 Token
         if self.config.credentials_file or not self.config.api_key:
@@ -238,7 +243,8 @@ class VertexClient:
             if cred_path and os.path.exists(cred_path):
                 now = time.time()
                 if self._adc_cached_token and now < self._adc_token_expiry - 60:
-                    return {"Authorization": f"Bearer {self._adc_cached_token}"}
+                    headers["Authorization"] = f"Bearer {self._adc_cached_token}"
+                    return headers
 
                 try:
                     with open(cred_path, "r", encoding="utf-8") as f:
@@ -260,7 +266,8 @@ class VertexClient:
                             self._adc_cached_token = t_data["access_token"]
                             self._adc_token_expiry = now + int(t_data.get("expires_in", 3600))
                             self.log("成功通过 ADC 刷新 OAuth2 Access Token (有效时间 %ds)" % t_data.get("expires_in", 3600), level="debug")
-                            return {"Authorization": f"Bearer {self._adc_cached_token}"}
+                            headers["Authorization"] = f"Bearer {self._adc_cached_token}"
+                            return headers
                 except Exception as exc:
                     self.log("ADC Token 刷新失败: %s" % exc, level="debug")
 
@@ -315,22 +322,39 @@ class VertexClient:
         if self.config.custom_models:
             return list(self.config.custom_models)
 
+        now = time.time()
+        with self.lock:
+            if self.model_cache and now - self.fetched_at < self.config.cache_ttl:
+                return list(self.model_cache)
+
         # 1. 尝试通过 OAuth2 动态获取 Model Garden 模型列表
         try:
             auth_headers = self._get_auth_headers()
             if "Authorization" in auth_headers:
-                url = f"{self.base_url()}/publishers/google/models"
-                req = urllib.request.Request(url, headers=auth_headers)
-                with self._opener().open(req, timeout=10) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    models = []
-                    for m in data.get("publisherModels", []):
-                        name = m.get("name", "").split("/")[-1]
-                        if name:
-                            models.append(name)
-                    if models:
-                        self.log("通过 OAuth2 成功动态发现 %d 个 Vertex 模型" % len(models))
-                        return models
+                loc = self.config.vertex_location or DEFAULT_VERTEX_LOCATION
+                urls = [
+                    "https://aiplatform.googleapis.com/v1beta1/publishers/google/models",
+                    f"https://{loc}-aiplatform.googleapis.com/v1beta1/publishers/google/models",
+                ]
+                for url in urls:
+                    try:
+                        req = urllib.request.Request(url, headers=auth_headers)
+                        with self._opener().open(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            models = []
+                            for m in data.get("publisherModels", []):
+                                name = m.get("name", "").split("/")[-1]
+                                if name and name not in models:
+                                    models.append(name)
+                            if models:
+                                self.log("通过 OAuth2 动态发现 %d 个 Vertex 模型: %s" % (
+                                    len(models), ", ".join(models[:6]) + ("..." if len(models) > 6 else "")))
+                                with self.lock:
+                                    self.model_cache = models
+                                    self.fetched_at = now
+                                return models
+                    except Exception as e:
+                        self.log("动态拉取 %s 跳过: %s" % (url, e), level="debug")
         except Exception as exc:
             self.log("Vertex 动态拉取模型列表跳过: %s" % exc, level="debug")
 
