@@ -349,6 +349,44 @@ class GeminiClient:
             return "image/bmp"
         return "image/png"
 
+    @staticmethod
+    def sanitize_schema(raw):
+        if not isinstance(raw, dict):
+            return raw
+        disallowed = {
+            "additionalProperties", "additional_properties",
+            "$schema", "$defs", "definitions", "title", "default"
+        }
+        cleaned = {}
+        for k, v in raw.items():
+            if k in disallowed:
+                continue
+            if k == "properties" and isinstance(v, dict):
+                cleaned["properties"] = {pk: GeminiClient.sanitize_schema(pv) for pk, pv in v.items()}
+            elif k == "items":
+                if isinstance(v, dict):
+                    cleaned["items"] = GeminiClient.sanitize_schema(v)
+                elif isinstance(v, list):
+                    cleaned["items"] = [GeminiClient.sanitize_schema(x) for x in v]
+                else:
+                    cleaned["items"] = v
+            elif k in ("anyOf", "any_of") and isinstance(v, list):
+                cleaned["any_of"] = [GeminiClient.sanitize_schema(x) for x in v]
+            elif k in ("oneOf", "one_of") and isinstance(v, list):
+                cleaned["any_of"] = [GeminiClient.sanitize_schema(x) for x in v]
+            elif k in ("allOf", "all_of") and isinstance(v, list):
+                if v:
+                    cleaned["any_of"] = [GeminiClient.sanitize_schema(x) for x in v]
+            elif isinstance(v, dict):
+                cleaned[k] = GeminiClient.sanitize_schema(v)
+            elif isinstance(v, list):
+                cleaned[k] = [GeminiClient.sanitize_schema(x) for x in v]
+            else:
+                cleaned[k] = v
+        if not cleaned:
+            return {"type": "object"}
+        return cleaned
+
     def convert_messages_and_config(self, messages, options=None, tools=None, system=None):
         contents = []
         system_instruction_text = str(system) if system else None
@@ -433,16 +471,18 @@ class GeminiClient:
             for t in tools:
                 if t.get("type") == "function":
                     fn = t.get("function", {})
+                    params = self.sanitize_schema(fn.get("parameters") or {})
                     decls.append(types.FunctionDeclaration(
                         name=fn.get("name"),
                         description=fn.get("description"),
-                        parameters=fn.get("parameters")
+                        parameters=params
                     ))
                 elif t.get("name"):
+                    params = self.sanitize_schema(t.get("parameters") or {})
                     decls.append(types.FunctionDeclaration(
                         name=t.get("name"),
                         description=t.get("description"),
-                        parameters=t.get("parameters")
+                        parameters=params
                     ))
             if decls:
                 sdk_tools = [types.Tool(function_declarations=decls)]
