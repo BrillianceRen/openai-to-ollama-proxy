@@ -1,2 +1,3 @@
-# openai-ollama-proxy 仅使用 Python 标准库, 无需安装任何第三方依赖
-# 运行环境要求: Python 3.8+ (使用了 http.server.ThreadingHTTPServer 等标准库特性)
+# openai-ollama-proxy 核心基于 Python 标准库实现 (运行环境: Python 3.8+)
+# 若使用 gemini-ollama-proxy 或 vertex-ollama-proxy，请安装官方 google-genai SDK：
+google-genai>=1.0.0
