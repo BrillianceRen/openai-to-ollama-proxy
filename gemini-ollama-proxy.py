@@ -135,9 +135,94 @@ class GeminiClient:
         self.fetched_at = 0
         self.models_entries = None
         self.models_defaults = {}
+        self._thought_signatures = {}
+        self._latest_valid_signature = None
+        self._sig_cache_file = os.path.join(SCRIPT_DIR, "tmp", "thought_signatures.json")
+        self._load_signatures_from_disk()
 
         if genai is None:
             raise RuntimeError("未安装 google-genai SDK。请运行: pip install google-genai")
+
+    def _load_signatures_from_disk(self):
+        try:
+            if os.path.exists(self._sig_cache_file):
+                with open(self._sig_cache_file, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                    for k, b64_val in raw.items():
+                        try:
+                            sig_bytes = base64.b64decode(b64_val)
+                            self._thought_signatures[k] = sig_bytes
+                            self._latest_valid_signature = sig_bytes
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    def _save_signatures_to_disk(self):
+        try:
+            os.makedirs(os.path.dirname(self._sig_cache_file), exist_ok=True)
+            data = {}
+            items = list(self._thought_signatures.items())[-500:]
+            for k, val in items:
+                if isinstance(val, (bytes, bytearray)):
+                    data[k] = base64.b64encode(val).decode("ascii")
+            with open(self._sig_cache_file, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def cache_thought_signature(self, name, args, sig, fn_id=None):
+        if not sig:
+            return
+        if not isinstance(sig, (bytes, bytearray)):
+            try:
+                sig = bytes(sig)
+            except Exception:
+                return
+        with self.lock:
+            self._latest_valid_signature = sig
+            if len(self._thought_signatures) > 1000:
+                self._thought_signatures.clear()
+            if fn_id:
+                self._thought_signatures[f"id:{fn_id}"] = sig
+            args_key = json.dumps(args, sort_keys=True, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+            self._thought_signatures[f"fn:{name}:{args_key}"] = sig
+            self._thought_signatures[f"latest:{name}"] = sig
+            self._save_signatures_to_disk()
+
+    def get_thought_signature(self, name, args, fn_id=None):
+        with self.lock:
+            if fn_id and f"id:{fn_id}" in self._thought_signatures:
+                return self._thought_signatures[f"id:{fn_id}"]
+            args_key = json.dumps(args, sort_keys=True, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+            if f"fn:{name}:{args_key}" in self._thought_signatures:
+                return self._thought_signatures[f"fn:{name}:{args_key}"]
+            if f"latest:{name}" in self._thought_signatures:
+                return self._thought_signatures[f"latest:{name}"]
+            return self._latest_valid_signature
+
+    @staticmethod
+    def extract_text_tool_calls(text):
+        """解析文本中的伪工具调用, 如 [Call tool `grep` with arguments: {...}]"""
+        if not text or "[Call tool " not in text:
+            return text, []
+        pattern = re.compile(r"\[Call tool [`']?([a-zA-Z0-9_.:-]+)[`']? with arguments:\s*(\{.*?\})\]", re.DOTALL)
+        tool_calls = []
+        for match in pattern.finditer(text):
+            name = match.group(1)
+            raw_args = match.group(2)
+            try:
+                args = json.loads(raw_args)
+            except Exception:
+                args = {"raw": raw_args}
+            tool_calls.append({
+                "function": {
+                    "name": name,
+                    "arguments": args
+                }
+            })
+        cleaned_text = pattern.sub("", text).strip()
+        return cleaned_text, tool_calls
 
     def log(self, msg, level="info"):
         levels = {"quiet": 0, "info": 1, "debug": 2}
@@ -207,6 +292,29 @@ class GeminiClient:
             try:
                 models = self.fetch_models()
                 self.log("Gemini 初始化探测成功, 可用模型数: %d" % len(models))
+                if self._latest_valid_signature is None:
+                    try:
+                        client = self.get_sdk_client()
+                        probe_tool = [types.Tool(function_declarations=[
+                            types.FunctionDeclaration(name="probe", description="probe", parameters={"type": "object", "properties": {"x": {"type": "string"}}})
+                        ])]
+                        resp = client.models.generate_content(
+                            model=self.normalize_model_name(self.config.default_model),
+                            contents=[types.Content(role="user", parts=[types.Part.from_text(text="call probe x=1")])],
+                            config=types.GenerateContentConfig(
+                                tools=probe_tool,
+                                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                            )
+                        )
+                        if resp.candidates and resp.candidates[0].content:
+                            for p in resp.candidates[0].content.parts:
+                                sig = getattr(p, "thought_signature", None)
+                                if sig:
+                                    self.cache_thought_signature("probe", {"x": "1"}, sig)
+                                    self.log("Gemini 思考签名预热成功", level="debug")
+                                    break
+                    except Exception as sig_err:
+                        self.log("Gemini 思考签名预热跳过: %s" % sig_err, level="debug")
             except Exception as e:
                 self.log("Gemini 初始化探测: %s" % e, level="debug")
         threading.Thread(target=_probe, daemon=True, name="gemini-warm").start()
@@ -390,6 +498,7 @@ class GeminiClient:
     def convert_messages_and_config(self, messages, options=None, tools=None, system=None):
         contents = []
         system_instruction_text = str(system) if system else None
+        tool_call_id_to_name = {}
 
         for msg in messages or []:
             role = msg.get("role", "user")
@@ -404,47 +513,75 @@ class GeminiClient:
             genai_role = "model" if role == "assistant" else "user"
             parts = []
 
-            if isinstance(content, str) and content:
-                parts.append(types.Part.from_text(text=content))
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        if item.get("type") == "text":
-                            parts.append(types.Part.from_text(text=item.get("text", "")))
-                        elif item.get("type") == "image_url":
-                            img_url = (item.get("image_url") or {}).get("url", "")
-                            if img_url.startswith("data:"):
-                                mime = img_url.split(";")[0].replace("data:", "")
-                                b64 = img_url.split(",", 1)[1] if "," in img_url else ""
-                                try:
-                                    raw = base64.b64decode(b64)
-                                    parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
-                                except Exception:
-                                    pass
-                    elif isinstance(item, str):
-                        parts.append(types.Part.from_text(text=item))
+            if role not in ("tool", "function"):
+                if isinstance(content, str) and content:
+                    parts.append(types.Part.from_text(text=content))
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            if item.get("type") == "text":
+                                parts.append(types.Part.from_text(text=item.get("text", "")))
+                            elif item.get("type") == "image_url":
+                                img_url = (item.get("image_url") or {}).get("url", "")
+                                if img_url.startswith("data:"):
+                                    mime = img_url.split(";")[0].replace("data:", "")
+                                    b64 = img_url.split(",", 1)[1] if "," in img_url else ""
+                                    try:
+                                        raw = base64.b64decode(b64)
+                                        parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
+                                    except Exception:
+                                        pass
+                        elif isinstance(item, str):
+                            parts.append(types.Part.from_text(text=item))
 
-            for img in msg_images:
-                val = str(img).strip()
-                if "," in val and val.lstrip().lower().startswith("data:"):
-                    val = val.split(",", 1)[1]
-                try:
-                    raw = base64.b64decode(val)
-                    mime = self._get_image_mime(raw)
-                    parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
-                except Exception:
-                    pass
+                for img in msg_images:
+                    val = str(img).strip()
+                    if "," in val and val.lstrip().lower().startswith("data:"):
+                        val = val.split(",", 1)[1]
+                    try:
+                        raw = base64.b64decode(val)
+                        mime = self._get_image_mime(raw)
+                        parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
+                    except Exception:
+                        pass
 
             for tc in msg.get("tool_calls") or []:
                 fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                args = fn.get("arguments", {})
-                args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
-                parts.append(types.Part.from_text(text=f"[Call tool `{fn.get('name', '')}` with arguments: {args_str}]"))
+                fn_name = fn.get("name") or tc.get("name") or ""
+                fn_id = tc.get("id") or (tc.get("function", {}).get("id") if isinstance(tc, dict) else None) or ""
+                if fn_id and fn_name:
+                    tool_call_id_to_name[fn_id] = fn_name
+                args = fn.get("arguments", {}) if "arguments" in fn else tc.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {"raw": args}
+                if not isinstance(args, dict):
+                    args = {"value": args}
+
+                sig = self.get_thought_signature(fn_name, args, fn_id)
+                if sig:
+                    parts.append(types.Part(
+                        function_call=types.FunctionCall(name=fn_name, args=args, id=fn_id if fn_id else None),
+                        thought_signature=sig
+                    ))
+                else:
+                    parts.append(types.Part.from_function_call(name=fn_name, args=args))
 
             if role in ("tool", "function"):
-                name = msg.get("name", "function_name")
-                resp_str = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-                parts.append(types.Part.from_text(text=f"[Tool `{name}` result: {resp_str}]"))
+                name = msg.get("name") or tool_call_id_to_name.get(msg.get("tool_call_id", "")) or "function_name"
+                resp_obj = content
+                if isinstance(content, str):
+                    try:
+                        parsed = json.loads(content)
+                        resp_obj = parsed if isinstance(parsed, dict) else {"result": parsed}
+                    except Exception:
+                        resp_obj = {"result": content}
+                elif not isinstance(content, dict):
+                    resp_obj = {"result": content}
+
+                parts.append(types.Part.from_function_response(name=name, response=resp_obj))
                 genai_role = "user"
 
             if not parts:
@@ -485,6 +622,7 @@ class GeminiClient:
             max_output_tokens=int(opts["num_predict"] if opts.get("num_predict") and int(opts["num_predict"]) > 0 else (opts.get("max_tokens") or 0)) or None,
             stop_sequences=[opts["stop"]] if isinstance(opts.get("stop"), str) else (list(opts["stop"]) if opts.get("stop") else None),
             tools=sdk_tools,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) if sdk_tools else None,
         )
 
         return contents, gen_config
@@ -519,17 +657,28 @@ class GeminiClient:
                     if getattr(p, "text", None):
                         text_parts.append(p.text)
                     elif getattr(p, "function_call", None):
+                        sig = getattr(p, "thought_signature", None)
+                        fn_id = getattr(p.function_call, "id", None)
+                        args = getattr(p.function_call, "args", {})
+                        self.cache_thought_signature(p.function_call.name, args, sig, fn_id)
                         tool_calls.append({
                             "function": {
                                 "name": p.function_call.name,
-                                "arguments": getattr(p.function_call, "args", {})
+                                "arguments": args
                             }
                         })
+
+        full_text = "".join(text_parts)
+        if not tool_calls and full_text:
+            cleaned_text, fallback_tcs = self.extract_text_tool_calls(full_text)
+            if fallback_tcs:
+                tool_calls.extend(fallback_tcs)
+                full_text = cleaned_text
 
         prompt_tokens = getattr(resp.usage_metadata, "prompt_token_count", 0) if resp.usage_metadata else 0
         completion_tokens = getattr(resp.usage_metadata, "candidates_token_count", 0) if resp.usage_metadata else 0
 
-        omsg = {"role": "assistant", "content": "".join(text_parts)}
+        omsg = {"role": "assistant", "content": full_text}
         done_reason = "stop"
         if tool_calls:
             omsg["tool_calls"] = tool_calls
@@ -563,6 +712,7 @@ class GeminiClient:
         client = self.get_sdk_client()
 
         tool_calls = []
+        stream_text_parts = []
         prompt_tokens = 0
         completion_tokens = 0
         final_reason = "stop"
@@ -578,6 +728,7 @@ class GeminiClient:
                     if cand.content:
                         for p in cand.content.parts:
                             if getattr(p, "text", None) and p.text:
+                                stream_text_parts.append(p.text)
                                 write(ndjson({
                                     "model": model_name,
                                     "created_at": now_iso(),
@@ -585,18 +736,34 @@ class GeminiClient:
                                     "done": False,
                                 }))
                             elif getattr(p, "function_call", None):
-                                tool_calls.append({
+                                sig = getattr(p, "thought_signature", None)
+                                fn_id = getattr(p.function_call, "id", None)
+                                args = getattr(p.function_call, "args", {})
+                                self.cache_thought_signature(p.function_call.name, args, sig, fn_id)
+                                tc = {
                                     "function": {
                                         "name": p.function_call.name,
-                                        "arguments": getattr(p.function_call, "args", {})
+                                        "arguments": args
                                     }
-                                })
+                                }
+                                tool_calls.append(tc)
+                                write(ndjson({
+                                    "model": model_name,
+                                    "created_at": now_iso(),
+                                    "message": {"role": "assistant", "content": "", "tool_calls": [tc]},
+                                    "done": False,
+                                }))
                 if chunk.usage_metadata:
                     prompt_tokens = getattr(chunk.usage_metadata, "prompt_token_count", prompt_tokens)
                     completion_tokens = getattr(chunk.usage_metadata, "candidates_token_count", completion_tokens)
         except Exception as exc:
             self.log("Gemini 流式错误: %s" % exc, level="error")
             raise UpstreamError(500, str(exc)) from exc
+
+        if not tool_calls and stream_text_parts:
+            _, fallback_tcs = self.extract_text_tool_calls("".join(stream_text_parts))
+            if fallback_tcs:
+                tool_calls.extend(fallback_tcs)
 
         final_msg = {"role": "assistant", "content": ""}
         if tool_calls:
@@ -816,6 +983,9 @@ class GeminiClient:
                     elif getattr(p, "function_call", None):
                         fn = p.function_call
                         args = getattr(fn, "args", {})
+                        sig = getattr(p, "thought_signature", None)
+                        fn_id = getattr(fn, "id", None) or f"call_{len(tool_calls)}"
+                        self.cache_thought_signature(getattr(fn, "name", ""), args, sig, fn_id)
                         args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
                         tc_chunk = {
                             "id": base_id,
@@ -824,7 +994,7 @@ class GeminiClient:
                             "model": model_name,
                             "choices": [{"index": 0, "delta": {"tool_calls": [{
                                 "index": len(tool_calls),
-                                "id": f"call_{len(tool_calls)}",
+                                "id": fn_id,
                                 "type": "function",
                                 "function": {"name": getattr(fn, "name", ""), "arguments": args_str},
                             }]}, "finish_reason": None}],
@@ -860,6 +1030,12 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def client(self):
         return self.server.client
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
 
     def log_message(self, format, *args):
         pass

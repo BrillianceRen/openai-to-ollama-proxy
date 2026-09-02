@@ -110,3 +110,37 @@ def test_image_mime_detection():
     assert GeminiClient._get_image_mime(png_bytes) == "image/png"
     jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF"
     assert GeminiClient._get_image_mime(jpeg_bytes) == "image/jpeg"
+
+
+def test_payload_builder_multiturn_tool_calls():
+    cfg = Config({"api_key": "test-key"})
+    client = GeminiClient(cfg)
+
+    # Pre-populate thought signature cache
+    client.cache_thought_signature("grep", {"pattern": "foo"}, b"sig-grep-foo", "call_1")
+
+    messages = [
+        {"role": "user", "content": "Search for foo"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "function": {"name": "grep", "arguments": {"pattern": "foo"}}}]},
+        {"role": "tool", "name": "grep", "content": "found in bar.txt"}
+    ]
+
+    contents, gen_config = client.convert_messages_and_config(messages=messages)
+    assert len(contents) == 3
+    assert contents[0].role == "user"
+    assert contents[1].role == "model"
+    assert contents[1].parts[0].function_call.name == "grep"
+    assert contents[1].parts[0].thought_signature == b"sig-grep-foo"
+    assert contents[2].role == "user"
+    assert contents[2].parts[0].function_response.name == "grep"
+    assert contents[2].parts[0].function_response.response == {"result": "found in bar.txt"}
+
+
+def test_extract_text_tool_calls():
+    raw_text = "Here is the result: [Call tool `grep` with arguments: {\"pattern\": \"test\"}] done"
+    cleaned, tool_calls = GeminiClient.extract_text_tool_calls(raw_text)
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "grep"
+    assert tool_calls[0]["function"]["arguments"] == {"pattern": "test"}
+    assert cleaned == "Here is the result:  done"
+
