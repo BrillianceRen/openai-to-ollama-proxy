@@ -144,3 +144,12 @@ def test_extract_text_tool_calls():
     assert tool_calls[0]["function"]["arguments"] == {"pattern": "test"}
     assert cleaned == "Here is the result:  done"
 
+
+def test_v1_chat_stream_signature(monkeypatch):
+    cfg = Config({"api_key": "test-key"})
+    client = GeminiClient(cfg)
+    monkeypatch.setattr(client, "chat", lambda body: {"message": {"content": "ok"}})
+    res = client.v1_chat({"model": "gemini-3.5-flash", "messages": []}, stream=False)
+    assert res["object"] == "chat.completion"
+    assert res["choices"][0]["message"]["content"] == "ok"
+

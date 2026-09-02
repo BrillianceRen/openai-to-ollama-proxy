@@ -861,8 +861,8 @@ class GeminiClient:
             })
         return {"object": "list", "data": data}
 
-    def v1_chat(self, body):
-        stream = body.get("stream", False)
+    def v1_chat(self, body, stream=False):
+        is_stream = stream or bool(body.get("stream", False))
         model_name = body.get("model", "")
         clean_model = self.normalize_model_name(model_name)
         options = {
@@ -872,7 +872,7 @@ class GeminiClient:
             "stop": body.get("stop"),
         }
 
-        if not stream:
+        if not is_stream:
             chat_res = self.chat({
                 "model": model_name,
                 "messages": body.get("messages", []),
