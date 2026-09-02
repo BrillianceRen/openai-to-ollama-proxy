@@ -786,13 +786,22 @@ class VertexClient:
                     if cand.content:
                         for p in cand.content.parts:
                             if getattr(p, "text", None) and p.text:
-                                stream_text_parts.append(p.text)
-                                write(ndjson({
-                                    "model": model_name,
-                                    "created_at": now_iso(),
-                                    "message": {"role": "assistant", "content": p.text},
-                                    "done": False,
-                                }))
+                                is_thought = getattr(p, "thought", False)
+                                if is_thought:
+                                    write(ndjson({
+                                        "model": model_name,
+                                        "created_at": now_iso(),
+                                        "message": {"role": "assistant", "content": "", "thinking": p.text},
+                                        "done": False,
+                                    }))
+                                else:
+                                    stream_text_parts.append(p.text)
+                                    write(ndjson({
+                                        "model": model_name,
+                                        "created_at": now_iso(),
+                                        "message": {"role": "assistant", "content": p.text},
+                                        "done": False,
+                                    }))
                             elif getattr(p, "function_call", None):
                                 sig = getattr(p, "thought_signature", None)
                                 fn_id = getattr(p.function_call, "id", None)
@@ -1030,12 +1039,14 @@ class VertexClient:
             if chunk.candidates and chunk.candidates[0].content:
                 for p in chunk.candidates[0].content.parts:
                     if getattr(p, "text", None) and p.text:
+                        is_thought = getattr(p, "thought", False)
+                        delta = {"reasoning_content": p.text} if is_thought else {"content": p.text}
                         item = {
                             "id": base_id,
                             "object": "chat.completion.chunk",
                             "created": created,
                             "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": p.text}, "finish_reason": None}],
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                         }
                         yield ("data: " + json.dumps(item, ensure_ascii=False) + "\n\n").encode("utf-8")
                     elif getattr(p, "function_call", None):
@@ -1096,7 +1107,14 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def log_message(self, format, *args):
-        pass
+        client = getattr(self.server, "client", None)
+        if not client:
+            return
+        msg = "%s %s" % (self.client_address[0], format % args)
+        if "/api/ps" in msg:
+            client.log(msg, level="debug")
+        else:
+            client.log(msg, level="info")
 
     def read_body(self):
         length_header = self.headers.get("Content-Length")

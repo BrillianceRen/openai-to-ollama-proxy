@@ -728,13 +728,22 @@ class GeminiClient:
                     if cand.content:
                         for p in cand.content.parts:
                             if getattr(p, "text", None) and p.text:
-                                stream_text_parts.append(p.text)
-                                write(ndjson({
-                                    "model": model_name,
-                                    "created_at": now_iso(),
-                                    "message": {"role": "assistant", "content": p.text},
-                                    "done": False,
-                                }))
+                                is_thought = getattr(p, "thought", False)
+                                if is_thought:
+                                    write(ndjson({
+                                        "model": model_name,
+                                        "created_at": now_iso(),
+                                        "message": {"role": "assistant", "content": "", "thinking": p.text},
+                                        "done": False,
+                                    }))
+                                else:
+                                    stream_text_parts.append(p.text)
+                                    write(ndjson({
+                                        "model": model_name,
+                                        "created_at": now_iso(),
+                                        "message": {"role": "assistant", "content": p.text},
+                                        "done": False,
+                                    }))
                             elif getattr(p, "function_call", None):
                                 sig = getattr(p, "thought_signature", None)
                                 fn_id = getattr(p.function_call, "id", None)
@@ -785,148 +794,107 @@ class GeminiClient:
             model_name, prompt_tokens, completion_tokens, time.time() - t0))
 
     def generate(self, body):
-        t0 = time.time()
-        model_name = body.get("model", "")
-        clean_model = self.normalize_model_name(model_name)
         prompt = body.get("prompt", "")
+        options = body.get("options") or {}
         images = body.get("images") or []
-        system = body.get("system")
-        messages = [{"role": "user", "content": prompt, "images": images}]
-
-        contents, config = self.convert_messages_and_config(
-            messages=messages,
-            options=body.get("options", {}),
-            system=system
-        )
-        self.log("generate model=%s target=%s stream=false" % (model_name, clean_model))
-        client = self.get_sdk_client()
-        try:
-            resp = client.models.generate_content(
-                model=clean_model,
-                contents=contents,
-                config=config
-            )
-        except Exception as exc:
-            self.log("Gemini SDK 错误: %s" % exc, level="error")
-            raise UpstreamError(500, str(exc)) from exc
-
-        text_parts = []
-        if resp.candidates and resp.candidates[0].content:
-            for p in resp.candidates[0].content.parts:
-                if getattr(p, "text", None):
-                    text_parts.append(p.text)
-
-        prompt_tokens = getattr(resp.usage_metadata, "prompt_token_count", 0) if resp.usage_metadata else 0
-        completion_tokens = getattr(resp.usage_metadata, "candidates_token_count", 0) if resp.usage_metadata else 0
-
-        out = {
-            "model": model_name,
-            "created_at": now_iso(),
-            "response": "".join(text_parts),
-            "done": True,
-            "done_reason": "stop",
-            "context": [],
-            "total_duration": int((time.time() - t0) * 1e9),
-            "load_duration": 0,
-            "prompt_eval_count": prompt_tokens,
-            "eval_count": completion_tokens,
+        msgs = [{"role": "user", "content": prompt, "images": images}]
+        cbody = {
+            "model": body.get("model", ""),
+            "messages": msgs,
+            "options": options,
+            "system": body.get("system"),
         }
-        self.log("generate 完成 model=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
-            model_name, prompt_tokens, completion_tokens, time.time() - t0))
-        return out
+        res = self.chat(cbody)
+        return {
+            "model": body.get("model", ""),
+            "created_at": res.get("created_at", now_iso()),
+            "response": res.get("message", {}).get("content", ""),
+            "done": True,
+            "total_duration": res.get("total_duration", 0),
+            "load_duration": res.get("load_duration", 0),
+            "prompt_eval_count": res.get("prompt_eval_count", 0),
+            "eval_count": res.get("eval_count", 0),
+        }
 
     def generate_stream(self, body, write):
-        t0 = time.time()
-        model_name = body.get("model", "")
-        clean_model = self.normalize_model_name(model_name)
         prompt = body.get("prompt", "")
+        options = body.get("options") or {}
         images = body.get("images") or []
-        system = body.get("system")
-        messages = [{"role": "user", "content": prompt, "images": images}]
+        msgs = [{"role": "user", "content": prompt, "images": images}]
+        cbody = {
+            "model": body.get("model", ""),
+            "messages": msgs,
+            "options": options,
+            "system": body.get("system"),
+        }
 
-        contents, config = self.convert_messages_and_config(
-            messages=messages,
-            options=body.get("options", {}),
-            system=system
-        )
-        self.log("generate model=%s target=%s stream=true" % (model_name, clean_model))
-        client = self.get_sdk_client()
+        def _forward(line_bytes):
+            try:
+                item = json.loads(line_bytes.decode("utf-8"))
+                out = {
+                    "model": body.get("model", ""),
+                    "created_at": item.get("created_at", now_iso()),
+                    "response": item.get("message", {}).get("content", ""),
+                    "done": item.get("done", False),
+                }
+                if item.get("done"):
+                    out["total_duration"] = item.get("total_duration", 0)
+                    out["load_duration"] = item.get("load_duration", 0)
+                    out["prompt_eval_count"] = item.get("prompt_eval_count", 0)
+                    out["eval_count"] = item.get("eval_count", 0)
+                write(ndjson(out))
+            except Exception:
+                pass
 
-        prompt_tokens = 0
-        completion_tokens = 0
-
-        try:
-            for chunk in client.models.generate_content_stream(
-                model=clean_model,
-                contents=contents,
-                config=config
-            ):
-                if chunk.candidates and chunk.candidates[0].content:
-                    for p in chunk.candidates[0].content.parts:
-                        if getattr(p, "text", None) and p.text:
-                            write(ndjson({
-                                "model": model_name,
-                                "created_at": now_iso(),
-                                "response": p.text,
-                                "done": False,
-                            }))
-                if chunk.usage_metadata:
-                    prompt_tokens = getattr(chunk.usage_metadata, "prompt_token_count", prompt_tokens)
-                    completion_tokens = getattr(chunk.usage_metadata, "candidates_token_count", completion_tokens)
-        except Exception as exc:
-            self.log("Gemini 流式错误: %s" % exc, level="error")
-            raise UpstreamError(500, str(exc)) from exc
-
-        write(ndjson({
-            "model": model_name,
-            "created_at": now_iso(),
-            "response": "",
-            "done": True,
-            "done_reason": "stop",
-            "context": [],
-            "total_duration": int((time.time() - t0) * 1e9),
-            "load_duration": 0,
-            "prompt_eval_count": prompt_tokens,
-            "eval_count": completion_tokens,
-        }))
-        self.log("generate 流式完成 model=%s prompt_tokens=%d completion_tokens=%d elapsed=%.2fs" % (
-            model_name, prompt_tokens, completion_tokens, time.time() - t0))
+        self.chat_stream(cbody, _forward)
 
     def v1_models(self):
-        model_ids = self.fetch_models()
+        models = self.fetch_models()
         data = []
-        for mid in model_ids:
+        now_ts = int(time.time())
+        for m in models:
             data.append({
-                "id": mid,
+                "id": m,
                 "object": "model",
-                "created": int(time.time()),
+                "created": now_ts,
                 "owned_by": "google",
             })
         return {"object": "list", "data": data}
 
-    def v1_chat(self, body, stream=False):
+    def v1_chat(self, body):
+        stream = body.get("stream", False)
         model_name = body.get("model", "")
         clean_model = self.normalize_model_name(model_name)
-        options = {}
-        for key in ("temperature", "top_p", "top_k", "max_tokens", "stop"):
-            if body.get(key) is not None:
-                options[key] = body[key]
+        options = {
+            "temperature": body.get("temperature"),
+            "top_p": body.get("top_p"),
+            "max_tokens": body.get("max_tokens"),
+            "stop": body.get("stop"),
+        }
 
         if not stream:
-            chat_res = self.chat({"model": clean_model, "messages": body.get("messages", []), "options": options, "tools": body.get("tools")})
-            omsg = chat_res.get("message", {})
+            chat_res = self.chat({
+                "model": model_name,
+                "messages": body.get("messages", []),
+                "options": options,
+                "tools": body.get("tools"),
+            })
             tool_calls = []
-            for i, tc in enumerate(omsg.get("tool_calls") or []):
-                fn = tc.get("function", {})
-                args = fn.get("arguments", {})
-                args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
-                tool_calls.append({
-                    "id": f"call_{i}",
-                    "type": "function",
-                    "function": {"name": fn.get("name", ""), "arguments": args_str}
-                })
+            if "tool_calls" in chat_res.get("message", {}):
+                for idx, tc in enumerate(chat_res["message"]["tool_calls"]):
+                    fn = tc.get("function", {})
+                    args = fn.get("arguments", {})
+                    args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else str(args)
+                    tool_calls.append({
+                        "id": f"call_{idx}",
+                        "type": "function",
+                        "function": {
+                            "name": fn.get("name", ""),
+                            "arguments": args_str,
+                        }
+                    })
 
-            msg = {"role": "assistant", "content": omsg.get("content") or None}
+            msg = {"role": "assistant", "content": chat_res.get("message", {}).get("content", "")}
             if tool_calls:
                 msg["tool_calls"] = tool_calls
 
@@ -972,12 +940,14 @@ class GeminiClient:
             if chunk.candidates and chunk.candidates[0].content:
                 for p in chunk.candidates[0].content.parts:
                     if getattr(p, "text", None) and p.text:
+                        is_thought = getattr(p, "thought", False)
+                        delta = {"reasoning_content": p.text} if is_thought else {"content": p.text}
                         item = {
                             "id": base_id,
                             "object": "chat.completion.chunk",
                             "created": created,
                             "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": p.text}, "finish_reason": None}],
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                         }
                         yield ("data: " + json.dumps(item, ensure_ascii=False) + "\n\n").encode("utf-8")
                     elif getattr(p, "function_call", None):
@@ -1038,7 +1008,14 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def log_message(self, format, *args):
-        pass
+        client = getattr(self.server, "client", None)
+        if not client:
+            return
+        msg = "%s %s" % (self.client_address[0], format % args)
+        if "/api/ps" in msg:
+            client.log(msg, level="debug")
+        else:
+            client.log(msg, level="info")
 
     def read_body(self):
         length_header = self.headers.get("Content-Length")
