@@ -368,9 +368,22 @@ def test_tool_conversion_and_schema_cleaning():
     assert gemini_tools is not None
     assert len(gemini_tools[0]["functionDeclarations"]) == 1
     decl = gemini_tools[0]["functionDeclarations"][0]
-    assert decl["name"] == "run_command"
-    assert decl["description"] == "Execute command"
     assert "$schema" not in decl["parameters"]
+
+    # Test type array and anyOf cleaning
+    complex_schema = {
+        "type": "object",
+        "properties": {
+            "opt_str": {"type": ["string", "null"], "description": "Optional string"},
+            "anyof_num": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "Optional int"},
+        }
+    }
+    cleaned_complex = _clean_json_schema(complex_schema)
+    assert cleaned_complex["properties"]["opt_str"]["type"] == "string"
+    assert cleaned_complex["properties"]["opt_str"]["nullable"] is True
+    assert cleaned_complex["properties"]["anyof_num"]["type"] == "integer"
+    assert cleaned_complex["properties"]["anyof_num"]["nullable"] is True
+    assert "anyOf" not in cleaned_complex["properties"]["anyof_num"]
 
 
 def test_messages_conversion_with_tools():

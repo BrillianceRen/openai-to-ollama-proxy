@@ -385,25 +385,83 @@ class AntigravityAuth:
 
 
 def _clean_json_schema(schema):
-    """清理 Gemini 不支持的 JSON Schema 关键字（例如 $schema, additionalProperties 等）"""
+    """
+    清理并规整化 JSON Schema，适配 Google Gemini / Antigravity API 的 Protobuf Schema 规范：
+    1. 消除 anyOf / oneOf / allOf 联合类型，提取非空类型分支并标记 nullable；
+    2. 处理 type 数组（如 ["string", "null"]），转换为单值枚举，并标记 nullable=True；
+    3. 剥离 Gemini 不支持的关键字（$schema, $defs, $id, $ref, title, default, additionalProperties 等）；
+    4. 递归规整 properties 与 items。
+    """
     if not isinstance(schema, dict):
         return schema
-    disallowed = {"$schema", "$defs", "definitions", "title", "additionalProperties", "additional_properties"}
+
+    # 1. 预处理 anyOf / oneOf / allOf
+    is_nullable = False
+    branches = schema.get("anyOf") or schema.get("oneOf") or schema.get("allOf")
+    base_schema = dict(schema)
+    if isinstance(branches, list):
+        non_null_branches = []
+        for b in branches:
+            if isinstance(b, dict):
+                b_type = b.get("type")
+                if b_type == "null" or (isinstance(b_type, list) and "null" in b_type and len(b_type) == 1):
+                    is_nullable = True
+                else:
+                    non_null_branches.append(b)
+        if non_null_branches:
+            first = non_null_branches[0]
+            if isinstance(first, dict):
+                for k, v in first.items():
+                    if k not in base_schema:
+                        base_schema[k] = v
+                    elif k == "type" and "type" not in schema:
+                        base_schema[k] = v
+        base_schema.pop("anyOf", None)
+        base_schema.pop("oneOf", None)
+        base_schema.pop("allOf", None)
+
+    disallowed = {
+        "$schema", "$defs", "$id", "$ref", "definitions", "title", "default",
+        "additionalProperties", "additional_properties", "anyOf", "oneOf", "allOf"
+    }
     cleaned = {}
-    for k, v in schema.items():
-        if k in disallowed:
+
+    # 2. 规范化 type 单值类型
+    raw_type = base_schema.get("type")
+    if isinstance(raw_type, list):
+        filtered = [t for t in raw_type if str(t).lower() != "null"]
+        if len(filtered) < len(raw_type):
+            is_nullable = True
+        cleaned_type = filtered[0] if filtered else "string"
+        cleaned["type"] = str(cleaned_type).lower()
+    elif isinstance(raw_type, str):
+        cleaned["type"] = raw_type.lower()
+    elif "properties" in base_schema:
+        cleaned["type"] = "object"
+    elif "items" in base_schema:
+        cleaned["type"] = "array"
+
+    if is_nullable or base_schema.get("nullable"):
+        cleaned["nullable"] = True
+
+    # 3. 递归清洗字段
+    for k, v in base_schema.items():
+        if k in disallowed or k in ("type", "nullable"):
             continue
         if k == "properties" and isinstance(v, dict):
             cleaned["properties"] = {pk: _clean_json_schema(pv) for pk, pv in v.items()}
         elif k == "items":
             if isinstance(v, dict):
                 cleaned["items"] = _clean_json_schema(v)
-            elif isinstance(v, list):
-                cleaned["items"] = [_clean_json_schema(x) for x in v]
+            elif isinstance(v, list) and v:
+                cleaned["items"] = _clean_json_schema(v[0])
             else:
                 cleaned["items"] = v
         else:
             cleaned[k] = v
+
+    if not cleaned:
+        return {"type": "object"}
     return cleaned
 
 
