@@ -3,13 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openai-ollama-proxy"
-version = "1.2.0"
-description = "OpenAI / Gemini / Vertex AI compatible API -> Ollama API proxy (stdlib only), for VS Copilot custom models"
+name = "ollama-bridge"
+version = "1.3.0"
+description = "OpenAI / Gemini / Vertex AI / Antigravity API -> Ollama & OpenAI API bridge (stdlib only), for VS Copilot custom models"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
-keywords = ["ollama", "openai", "gemini", "vertex", "proxy", "copilot", "multimodal", "llm"]
+keywords = ["ollama", "openai", "gemini", "vertex", "antigravity", "proxy", "bridge", "copilot", "multimodal", "llm"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -33,9 +33,10 @@ dev = ["google-genai>=1.0.0", "pytest>=7.0"]
 openai-ollama-proxy = "openai_ollama_proxy:main"
 gemini-ollama-proxy = "gemini_ollama_proxy:main"
 vertex-ollama-proxy = "vertex_ollama_proxy:main"
+antigravity-ollama-proxy = "antigravity_ollama_proxy:main"
 
 [tool.setuptools]
-py-modules = ["openai_ollama_proxy", "gemini_ollama_proxy", "vertex_ollama_proxy"]
+py-modules = ["openai_ollama_proxy", "gemini_ollama_proxy", "vertex_ollama_proxy", "antigravity_ollama_proxy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

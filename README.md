@@ -1,4 +1,4 @@
-# openai-ollama-proxy
+# ollama-bridge
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 </div>
 
-本项目的目的是把 **OpenAI 兼容 API**（DeepSeek / 智谱 BigModel / Kimi / NVIDIA 等）、**Google Gemini Interactions API** 以及 **Google Cloud Vertex AI Agent Platform API** 转换并暴露为 **Ollama API**，从而让 **Visual Studio 2022 / 2026 内置的 GitHub Copilot** 通过「添加 Ollama Provider」自由使用自定义 AI 模型。**本项目不是为 VS Code 设计的**。
+本项目的目的是把 **OpenAI 兼容 API**（DeepSeek / 智谱 BigModel / Kimi / NVIDIA 等）、**Google Gemini Interactions API**、**Google Cloud Vertex AI Agent Platform API** 以及 **Google Antigravity 服务** 转换并暴露为 **Ollama 与 OpenAI 兼容 API**，从而让 **Visual Studio 2022 / 2026 内置的 GitHub Copilot** 通过「添加 Ollama Provider」自由使用自定义 AI 模型。**本项目不是为 VS Code 设计的**。
 
 全套工具仅依赖 Python 标准库，**零第三方依赖**。
 
@@ -21,6 +21,7 @@
 | **`openai_ollama_proxy.py`** | OpenAI 兼容接口（DeepSeek, 智谱, Kimi, NVIDIA, OpenCode 等） | `deepseek-v4-flash`, `glm-5.2`, `kimi`, `nvidia/*` 等 | `11434` |
 | **`gemini-ollama-proxy.py`** | Google AI Developer API (`v1beta/interactions`, `v1beta/models`) | `gemini-3.5-flash`, `gemini-3.7-flash`, `gemma-4-26b-a4b-it` 等 | `11434` |
 | **`vertex-ollama-proxy.py`** | Google Cloud Vertex AI Agent Platform (`generateContent`) | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite` 等 | `11434` |
+| **`antigravity-ollama-proxy.py`** | Google Antigravity 服务 (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-5`, `claude-opus-4-5`, `gemini-2.5-pro` 等 | `11434` |
 
 ---
 
@@ -63,6 +64,15 @@ python gemini-ollama-proxy.py --port 11434
 python vertex-ollama-proxy.py --port 11434
 ```
 
+#### (4) 启动 Google Antigravity 代理
+```powershell
+# 首次使用可执行交互式授权获取 refresh_token 并写入 config.json
+python antigravity-ollama-proxy.py --login
+
+# 启动服务 (同时开放 Ollama 与 OpenAI 兼容端点)
+python antigravity-ollama-proxy.py --port 11434
+```
+
 ### 3. 验证连通性
 ```powershell
 curl http://127.0.0.1:11434/api/tags
@@ -96,6 +106,15 @@ curl http://127.0.0.1:11434/v1/models
     "vertex_project": "你的GoogleCloud项目号或ID",
     "vertex_location": "us-central1",
     "default_model": "gemini-2.5-flash"
+  },
+
+  // Google Antigravity 服务专属配置
+  "antigravity": {
+    "project_id": "aicode-consumers",
+    "refresh_token": "1//04请填入你的RefreshToken",
+    "api_url": "https://daily-cloudcode-pa.googleapis.com",
+    "default_model": "gemini-3.7-flash-high",
+    "filter_thinking": true
   },
 
   // 通用 OpenAI 兼容 Provider 列表

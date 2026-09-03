@@ -1,4 +1,4 @@
-# openai-ollama-proxy
+# ollama-bridge
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 </div>
 
-This project turns **OpenAI-compatible APIs** (DeepSeek, Zhipu BigModel, Kimi, NVIDIA, etc.), **Google Gemini Interactions API**, and **Google Cloud Vertex AI Agent Platform API** into an **Ollama API**, so the GitHub Copilot built into **Visual Studio 2022 / 2026** can use custom AI models through "Add Ollama Provider". It is **not designed for VS Code**.
+This project turns **OpenAI-compatible APIs** (DeepSeek, Zhipu BigModel, Kimi, NVIDIA, etc.), **Google Gemini Interactions API**, **Google Cloud Vertex AI Agent Platform API**, and **Google Antigravity Service** into **Ollama and OpenAI-compatible APIs**, so the GitHub Copilot built into **Visual Studio 2022 / 2026** can use custom AI models through "Add Ollama Provider". It is **not designed for VS Code**.
 
 The runtime depends only on the Python standard library with **zero third-party dependencies**.
 
@@ -21,6 +21,7 @@ The runtime depends only on the Python standard library with **zero third-party 
 | **`openai_ollama_proxy.py`** | OpenAI-compatible APIs (DeepSeek, Zhipu, Kimi, NVIDIA, OpenCode, etc.) | `deepseek-v4-flash`, `glm-5.2`, `kimi`, `nvidia/*` | `11434` |
 | **`gemini-ollama-proxy.py`** | Google AI Developer API (`v1beta/interactions`, `v1beta/models`) | `gemini-3.5-flash`, `gemini-3.7-flash`, `gemma-4-26b-a4b-it` | `11434` |
 | **`vertex-ollama-proxy.py`** | Google Cloud Vertex AI Agent Platform (`generateContent`) | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite` | `11434` |
+| **`antigravity-ollama-proxy.py`** | Google Antigravity Service (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-5`, `claude-opus-4-5`, `gemini-2.5-pro` | `11434` |
 
 ---
 
@@ -63,6 +64,15 @@ python gemini-ollama-proxy.py --port 11434
 python vertex-ollama-proxy.py --port 11434
 ```
 
+#### (4) Google Antigravity Proxy
+```powershell
+# Interactive OAuth login helper on first run
+python antigravity-ollama-proxy.py --login
+
+# Start proxy server (simultaneously exposes Ollama & OpenAI endpoints)
+python antigravity-ollama-proxy.py --port 11434
+```
+
 ### 3. Verify
 ```powershell
 curl http://127.0.0.1:11434/api/tags
@@ -96,6 +106,15 @@ curl http://127.0.0.1:11434/v1/models
     "vertex_project": "YOUR_GCP_PROJECT_ID_OR_NUMBER",
     "vertex_location": "us-central1",
     "default_model": "gemini-2.5-flash"
+  },
+
+  // Google Antigravity Service configuration
+  "antigravity": {
+    "project_id": "aicode-consumers",
+    "refresh_token": "1//04YOUR_REFRESH_TOKEN",
+    "api_url": "https://daily-cloudcode-pa.googleapis.com",
+    "default_model": "gemini-3.7-flash-high",
+    "filter_thinking": true
   },
 
   // OpenAI-compatible Providers

@@ -23,6 +23,15 @@
     "vertex_location": "us-central1",
     "default_model": "gemini-2.5-flash"
   },
+  "antigravity": {
+    "project_id": "aicode-consumers",
+    "refresh_token": "1//04请填入你的RefreshToken",
+    "api_url": "https://daily-cloudcode-pa.googleapis.com",
+    "default_model": "gemini-3.7-flash-high",
+    "filter_thinking": true,
+    "enable_credit": false,
+    "model_mappings": {}
+  },
   "providers": [
     {
       "name": "deepseek",

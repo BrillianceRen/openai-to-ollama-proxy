@@ -1,0 +1,762 @@
+{
+  "provider": "antigravity",
+  "defaults": {
+    "capabilities": [
+      "completion",
+      "tools"
+    ],
+    "details": {
+      "parent_model": "",
+      "format": "",
+      "family": "",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": ""
+    },
+    "context_length": 1048576,
+    "embedding_length": 2048,
+    "size": 0,
+    "digest": ""
+  },
+  "models": [
+    {
+      "name": "gpt-oss-120b-medium",
+      "model": "gpt-oss-120b-medium",
+      "digest": "ebf2b645d2c2",
+      "size": 120000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gpt",
+        "general.parameter_count": 120000000000,
+        "gpt.context_length": 131072,
+        "gpt.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.1-flash-lite",
+      "model": "gemini-3.1-flash-lite",
+      "digest": "0c0cf0da093c",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.6-flash-high",
+      "model": "gemini-3.6-flash-high",
+      "digest": "a33b68913769",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3-flash",
+      "model": "gemini-3-flash",
+      "digest": "9542d5c077c2",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "tab_jump_flash_lite_preview",
+      "model": "tab_jump_flash_lite_preview",
+      "digest": "327f1590a11d",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 16384,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "claude-opus-4-6-thinking",
+      "model": "claude-opus-4-6-thinking",
+      "digest": "64db183fb49c",
+      "size": 400000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "claude",
+        "general.parameter_count": 400000000000,
+        "claude.context_length": 250000,
+        "claude.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.6-flash-low",
+      "model": "gemini-3.6-flash-low",
+      "digest": "aa82a53cc74d",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.7-flash-high",
+      "model": "gemini-3.7-flash-high",
+      "digest": "0acab2772529",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.1-pro-low",
+      "model": "gemini-3.1-pro-low",
+      "digest": "9b034df77097",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.7-flash-medium",
+      "model": "gemini-3.7-flash-medium",
+      "digest": "a5117a3ff117",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.6-flash-medium",
+      "model": "gemini-3.6-flash-medium",
+      "digest": "9c174ad52a10",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.6-flash-tiered",
+      "model": "gemini-3.6-flash-tiered",
+      "digest": "a968718c4a63",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "model": "gemini-2.5-pro",
+      "digest": "6d734050d5ff",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.1-flash-image",
+      "model": "gemini-3.1-flash-image",
+      "digest": "9eeeb48e860a",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.7-flash-tiered",
+      "model": "gemini-3.7-flash-tiered",
+      "digest": "30032d4864ac",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "chat_23310",
+      "model": "chat_23310",
+      "digest": "77262f90f8a7",
+      "size": 30000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 30000000000,
+        "gemini.context_length": 32768,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.1-pro-high",
+      "model": "gemini-3.1-pro-high",
+      "digest": "4e5c8d94ca4f",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-flash-thinking",
+      "model": "gemini-2.5-flash-thinking",
+      "digest": "5bd724e08f4a",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "tab_flash_lite_preview",
+      "model": "tab_flash_lite_preview",
+      "digest": "989690b63aa3",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 16384,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.7-flash-low",
+      "model": "gemini-3.7-flash-low",
+      "digest": "3c246be7fd8a",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-pro-agent",
+      "model": "gemini-pro-agent",
+      "digest": "cdb0bfae89c2",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 200000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.5-flash-low",
+      "model": "gemini-3.5-flash-low",
+      "digest": "27561387dfe8",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3-flash-agent",
+      "model": "gemini-3-flash-agent",
+      "digest": "1da941561255",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-3.5-flash-extra-low",
+      "model": "gemini-3.5-flash-extra-low",
+      "digest": "a94daea4974e",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-flash",
+      "model": "gemini-2.5-flash",
+      "digest": "de40dabae318",
+      "size": 70000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 70000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "gemini-2.5-flash-lite",
+      "model": "gemini-2.5-flash-lite",
+      "digest": "03696df54a61",
+      "size": 8000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 8000000000,
+        "gemini.context_length": 1048576,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "claude-sonnet-4-6",
+      "model": "claude-sonnet-4-6",
+      "digest": "7d811269d13f",
+      "size": 200000000000,
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking",
+        "vision"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "claude",
+        "general.parameter_count": 200000000000,
+        "claude.context_length": 250000,
+        "claude.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    },
+    {
+      "name": "chat_20706",
+      "model": "chat_20706",
+      "digest": "0c035d7276dd",
+      "size": 30000000000,
+      "capabilities": [
+        "completion",
+        "tools"
+      ],
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "model_info": {
+        "general.architecture": "gemini",
+        "general.parameter_count": 30000000000,
+        "gemini.context_length": 16384,
+        "gemini.embedding_length": 2048
+      },
+      "modified_at": "2026-09-03T00:00:00Z"
+    }
+  ]
+}
