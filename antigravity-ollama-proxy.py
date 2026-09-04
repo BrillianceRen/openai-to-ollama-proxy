@@ -1058,7 +1058,8 @@ class Handler(BaseHTTPRequestHandler):
 
             # 1. 工具执行结果返回 (OpenAI role: tool / function)
             if role in ("tool", "function"):
-                name = msg.get("name") or tool_id_to_name.get(msg.get("tool_call_id", ""), "tool_response")
+                call_id = msg.get("tool_call_id") or msg.get("id") or ""
+                name = msg.get("name") or tool_id_to_name.get(call_id, "") or "tool_response"
                 resp_content = content
                 if isinstance(content, str):
                     try:
@@ -1068,50 +1069,21 @@ class Handler(BaseHTTPRequestHandler):
                         resp_content = {"result": content}
                 elif not isinstance(content, dict):
                     resp_content = {"result": content}
+                fr_obj = {
+                    "name": name,
+                    "response": resp_content
+                }
+                if call_id:
+                    fr_obj["id"] = call_id
                 parts.append({
-                    "functionResponse": {
-                        "name": name,
-                        "response": resp_content
-                    }
+                    "functionResponse": fr_obj
                 })
                 contents.append({"role": "user", "parts": parts})
                 continue
 
             gemini_role = "model" if role in ("assistant", "model") else "user"
 
-            # 2. Assistant 历史生成的工具调用 (tool_calls)
-            for tc in msg.get("tool_calls") or []:
-                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                fn_name = fn.get("name") or tc.get("name") or ""
-                fn_id = tc.get("id") or ""
-                if fn_id and fn_name:
-                    tool_id_to_name[fn_id] = fn_name
-                args = fn.get("arguments", {}) if "arguments" in fn else tc.get("arguments", {})
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        args = {"raw": args}
-                if not isinstance(args, dict):
-                    args = {"value": args}
-                sig = ""
-                if hasattr(self, "client") and self.client and hasattr(self.client, "get_thought_signature"):
-                    sig = self.client.get_thought_signature(fn_name, args, fn_id)
-                elif hasattr(self, "server") and hasattr(self.server, "client") and hasattr(self.server.client, "get_thought_signature"):
-                    sig = self.server.client.get_thought_signature(fn_name, args, fn_id)
-                if not sig:
-                    sig = DEFAULT_THOUGHT_SIGNATURE
-
-                fc_part = {
-                    "functionCall": {
-                        "name": fn_name,
-                        "args": args
-                    },
-                    "thoughtSignature": sig
-                }
-                parts.append(fc_part)
-
-            # 3. 文本内容与多模态图片
+            # 2. 文本内容与多模态图片（先于工具调用，避免 Claude 协议将 functionCall 后的文本判定为尾部 prefill）
             if isinstance(content, str):
                 if content:
                     parts.append({"text": content})
@@ -1136,13 +1108,79 @@ class Handler(BaseHTTPRequestHandler):
                     raw_b64 = raw_b64.split(",", 1)[1]
                 parts.append({"inlineData": {"mimeType": "image/jpeg", "data": raw_b64}})
 
+            # 3. Assistant 历史生成的工具调用 (tool_calls)
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                fn_name = fn.get("name") or tc.get("name") or ""
+                fn_id = tc.get("id") or (tc.get("function", {}).get("id") if isinstance(tc, dict) else None) or ""
+                if not fn_id:
+                    fn_id = f"call_{uuid.uuid4().hex[:8]}"
+                if fn_id and fn_name:
+                    tool_id_to_name[fn_id] = fn_name
+                args = fn.get("arguments", {}) if "arguments" in fn else tc.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {"raw": args}
+                if not isinstance(args, dict):
+                    args = {"value": args}
+                sig = ""
+                if hasattr(self, "client") and self.client and hasattr(self.client, "get_thought_signature"):
+                    sig = self.client.get_thought_signature(fn_name, args, fn_id)
+                elif hasattr(self, "server") and hasattr(self.server, "client") and hasattr(self.server.client, "get_thought_signature"):
+                    sig = self.server.client.get_thought_signature(fn_name, args, fn_id)
+                if not sig:
+                    sig = DEFAULT_THOUGHT_SIGNATURE
+
+                fc_part = {
+                    "functionCall": {
+                        "name": fn_name,
+                        "args": args,
+                        "id": fn_id
+                    },
+                    "thoughtSignature": sig
+                }
+                parts.append(fc_part)
+
             if not parts:
-                parts.append({"text": ""})
+                if gemini_role == "user":
+                    parts.append({"text": ""})
+                else:
+                    # Claude 不允许 model 轮次产出空文本，跳过该空 assistant 消息
+                    continue
 
             contents.append({"role": gemini_role, "parts": parts})
 
+        # 合并相邻相同 role 的消息块，确保严格遵循 user/model 交替规范（Claude/Gemini 强约束）
+        merged_contents = []
+        for c in contents:
+            if merged_contents and merged_contents[-1]["role"] == c["role"]:
+                merged_contents[-1]["parts"].extend(c["parts"])
+            else:
+                merged_contents.append(c)
+        contents = merged_contents
+
+        # 确保每个 model turn 中：
+        # 1. 过滤掉空文本 part（Claude 要求 text.text 必须非空）
+        # 2. 所有 text 块均置于 functionCall 之前（Claude 协议强约束：tool_use 之后不允许有 text）
+        for c in contents:
+            if c.get("role") == "model":
+                c["parts"] = [p for p in c.get("parts", []) if not ("text" in p and p["text"] == "")]
+                text_parts = [p for p in c.get("parts", []) if "functionCall" not in p]
+                fc_parts = [p for p in c.get("parts", []) if "functionCall" in p]
+                c["parts"] = text_parts + fc_parts
+                if not c["parts"]:
+                    c["parts"] = [{"text": "."}]
+
         if not contents:
             contents.append({"role": "user", "parts": [{"text": ""}]})
+
+        # 确保对话开头与结尾符合 Claude 规范（首尾必须为 user，不允许 assistant prefill）
+        if contents[0].get("role") == "model":
+            contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
+        if contents[-1].get("role") == "model":
+            contents.append({"role": "user", "parts": [{"text": "Continue"}]})
 
         sys_text = "\n\n".join(system_instructions)
         return contents, sys_text

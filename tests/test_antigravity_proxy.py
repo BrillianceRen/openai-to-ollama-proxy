@@ -423,11 +423,13 @@ def test_messages_conversion_with_tools():
     assert "functionCall" in contents[1]["parts"][0]
     assert contents[1]["parts"][0]["functionCall"]["name"] == "run_command"
     assert contents[1]["parts"][0]["functionCall"]["args"] == {"command": "git status"}
+    assert contents[1]["parts"][0]["functionCall"]["id"] == "call_abc"
     # 3. user functionResponse
     assert contents[2]["role"] == "user"
     assert "functionResponse" in contents[2]["parts"][0]
     assert contents[2]["parts"][0]["functionResponse"]["name"] == "run_command"
     assert contents[2]["parts"][0]["functionResponse"]["response"] == {"result": "On branch main\nnothing to commit"}
+    assert contents[2]["parts"][0]["functionResponse"]["id"] == "call_abc"
 
 
 def test_e2e_tool_calls_streaming(running_server, monkeypatch):

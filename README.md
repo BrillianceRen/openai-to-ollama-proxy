@@ -21,7 +21,19 @@
 | **`openai_ollama_proxy.py`** | OpenAI 兼容接口（DeepSeek, 智谱, Kimi, NVIDIA, OpenCode 等） | `deepseek-v4-flash`, `glm-5.2`, `kimi`, `nvidia/*` 等 | `11434` |
 | **`gemini-ollama-proxy.py`** | Google AI Developer API (`v1beta/interactions`, `v1beta/models`) | `gemini-3.5-flash`, `gemini-3.7-flash`, `gemma-4-26b-a4b-it` 等 | `11434` |
 | **`vertex-ollama-proxy.py`** | Google Cloud Vertex AI Agent Platform (`generateContent`) | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite` 等 | `11434` |
-| **`antigravity-ollama-proxy.py`** | Google Antigravity 服务 (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-5`, `claude-opus-4-5`, `gemini-2.5-pro` 等 | `11434` |
+| **`antigravity-ollama-proxy.py`** | Google Antigravity 服务 (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-6`, `claude-opus-4-6`, `gemini-3.7-flash-high` 等 | `11434` |
+
+### Antigravity 核心能力特性
+
+* **完整多轮工具调用 (Tool Calling)**：原生支持 OpenAI / Ollama 格式工具向 Gemini `functionDeclarations` 与 Claude `tool_use` 的相互转换与多轮会话回填。
+* **思考签名 (Thought Signature) 缓存与自动回填**：针对 Gemini 2.5 / 3.7 思考模型，自动提取并持久化每轮调用的加密签名，彻底避免上游 `Function call is missing a thought_signature` 校验异常。
+* **Claude 深度协议适配 (针对 Claude Sonnet / Opus 模型)**：
+  * **严格保序防拆分**：确保在 `model` 轮次中所有思考与解释文本均置于 `functionCall` 之前，规避上游解析器切分导致的非法尾部预填充。
+  * **过滤空文本块**：拦截空 assistant 消息并过滤空文本 part，杜绝 `text.text: Field required` 报错。
+  * **完备 ID 传递**：自动注入与关联 `tool_use.id` 和 `functionResponse.id`，杜绝 `tool_use.id: Field required` 报错。
+  * **自动角色交替与边界兜底**：自动合并相邻同角色轮次，确保首尾消息严格为 `user`，彻底杜绝 `assistant message prefill` 错误。
+* **Protobuf Schema 智能清洗**：自动将 Draft-07 / 2020-12 的 `type` 数组（如 `["string", "null"]`）规整为单值类型 + `nullable: true`，智能解包 `anyOf` / `oneOf` 联合类型，完美兼容 VS Copilot 上百个复杂参数工具。
+
 
 ---
 
@@ -176,6 +188,7 @@ Visual Studio 内置的 GitHub Copilot 不支持直接填写 OpenAI 兼容地址
 ## models/ 模板目录
 
 `models/<provider>.json` 按 provider 保存模型元数据，代理用它构建 Ollama `/api/tags` 和 `/api/show` 应答：
+- `models/antigravity.json`: Antigravity Claude 3.7 / 3.5 Sonnet / Opus / Gemini 3.7 Flash 系列
 - `models/gemini.json`: Gemini 3.5 / 3.7 / Gemma 4 系列
 - `models/vertex.json`: Vertex AI Gemini 2.5 Flash / Pro / Flash-Lite 系列
 - `models/deepseek.json`, `models/bigmodel.json`, `models/nvidia.json` 等
@@ -191,6 +204,7 @@ pip install -e .
 openai-ollama-proxy --config config.json
 gemini-ollama-proxy --port 11434
 vertex-ollama-proxy --port 11434
+antigravity-ollama-proxy --port 11434
 ```
 
 ---

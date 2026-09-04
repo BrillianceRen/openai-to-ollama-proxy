@@ -21,7 +21,19 @@ The runtime depends only on the Python standard library with **zero third-party 
 | **`openai_ollama_proxy.py`** | OpenAI-compatible APIs (DeepSeek, Zhipu, Kimi, NVIDIA, OpenCode, etc.) | `deepseek-v4-flash`, `glm-5.2`, `kimi`, `nvidia/*` | `11434` |
 | **`gemini-ollama-proxy.py`** | Google AI Developer API (`v1beta/interactions`, `v1beta/models`) | `gemini-3.5-flash`, `gemini-3.7-flash`, `gemma-4-26b-a4b-it` | `11434` |
 | **`vertex-ollama-proxy.py`** | Google Cloud Vertex AI Agent Platform (`generateContent`) | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite` | `11434` |
-| **`antigravity-ollama-proxy.py`** | Google Antigravity Service (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-5`, `claude-opus-4-5`, `gemini-2.5-pro` | `11434` |
+| **`antigravity-ollama-proxy.py`** | Google Antigravity Service (`cloudcode-pa.googleapis.com`) | `claude-sonnet-4-6`, `claude-opus-4-6`, `gemini-3.7-flash-high` | `11434` |
+
+### Antigravity Core Capabilities
+
+* **Full Multi-turn Tool Calling**: Seamless conversion and roundtrip state tracking between OpenAI / Ollama tool calls and Gemini `functionDeclarations` / Claude `tool_use`.
+* **Thought Signature Caching**: Automatically extracts and persists cryptographically verified thought signatures for Gemini 2.5 / 3.7 thinking models, avoiding upstream `Function call is missing a thought_signature` errors.
+* **Anthropic Claude Protocol Compatibility (Sonnet / Opus models)**:
+  * **Strict Parts Ordering**: Enforces text and reasoning blocks before `functionCall` blocks in model turns to prevent Google's Anthropic converter from generating dangling assistant message prefill.
+  * **Empty Text Sanitization**: Skips empty assistant turns and removes empty text parts to prevent `text.text: Field required` errors.
+  * **Tool ID Pairing**: Guarantees `tool_use.id` and `functionResponse.id` synchronization, eliminating `tool_use.id: Field required`.
+  * **Turn Alternation & User Boundary**: Merges adjacent same-role messages and guarantees conversation begins and ends with `user` messages, avoiding `This model does not support assistant message prefill`.
+* **Protobuf Schema Cleaning**: Converts JSON Schema Draft-07 / 2020-12 `type` arrays (e.g., `["string", "null"]`) to single enum types with `nullable: true`, unpacks `anyOf` / `oneOf` unions, ensuring 100% compatibility with VS Copilot's complex tool registry.
+
 
 ---
 
@@ -176,6 +188,7 @@ Visual Studio built-in GitHub Copilot allows adding custom models via "Add Ollam
 ## models/ Metadata Directory
 
 `models/<provider>.json` stores metadata for building Ollama `/api/tags` and `/api/show` responses:
+- `models/antigravity.json`: Antigravity Claude 3.7 / 3.5 Sonnet / Opus / Gemini 3.7 Flash series
 - `models/gemini.json`: Gemini 3.5 / 3.7 / Gemma 4 series
 - `models/vertex.json`: Vertex AI Gemini 2.5 Flash / Pro / Flash-Lite series
 - `models/deepseek.json`, `models/bigmodel.json`, `models/nvidia.json`, etc.
@@ -191,6 +204,7 @@ pip install -e .
 openai-ollama-proxy --config config.json
 gemini-ollama-proxy --port 11434
 vertex-ollama-proxy --port 11434
+antigravity-ollama-proxy --port 11434
 ```
 
 ---
